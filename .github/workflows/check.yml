@@ -5,17 +5,21 @@ on:
     - cron: '0 * * * *'  # 매 시간 정각 실행
   workflow_dispatch:      # 수동 실행 버튼
 
+# 전역 환경 변수 설정 (Node.js 20 경고 제거 및 Node.js 24 강제 사용)
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4  # v3에서 v4로 업데이트
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5  # v4에서 v5로 업데이트
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.11' # 최신 안정화 버전 권장
+          python-version: '3.11'
 
       - name: Install dependencies
         run: pip install requests beautifulsoup4
@@ -31,5 +35,5 @@ jobs:
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           git add versions.json
-          # 변경사항이 있을 때만 커밋
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Update versions.json" && git push)
+          # 데이터 구조(출시일 포함) 변경에 따른 커밋 로직
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update versions and release dates" && git push)
