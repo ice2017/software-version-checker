@@ -11,15 +11,17 @@ def send_telegram_msg(message):
     if token and chat_id:
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         payload = {'chat_id': chat_id, 'text': message}
-        try: requests.post(url, json=payload, timeout=10)
-        except: pass
+        try:
+            requests.post(url, json=payload, timeout=10)
+        except:
+            pass
 
 def get_latest_versions():
     versions = {}
     
-    # [1] Windows 11 24H2 (파이썬 내부 문자열 처리로 우회 - 가장 안전)
+    # [1] Windows 11 24H2 보안 업데이트 (순서 1번)
     try:
-        # 정규표현식이 깨지는 grep 대신, 텍스트만 뽑아서 파이썬이 직접 처리합니다.
+        # 터미널에서 성공했던 로직: HTML 태그 제거 및 공백 압축까지만 쉘에서 처리
         cmd = (
             'curl -fsSL "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information" | '
             'sed -n "/24H2/,$p" | sed "s/<[^>]*>/ /g" | tr -s " "'
@@ -29,24 +31,29 @@ def get_latest_versions():
         if res:
             parts = res.split()
             u_date, u_build, u_kb = "-", "-", "-"
-            # 터미널 결과와 동일하게 'B' 타입을 기점으로 데이터 세트 탐색
+            # 'B' (보안 업데이트 타입) 지점을 찾고 그 주변 데이터 추출
             for i, word in enumerate(parts):
-                if word == "B" and i > 0 and len(parts[i-1]) == 7: # 2026-04 B 형태
-                    # B 지점 이후 10개 단어 내에서 날짜, 빌드, KB 획득
+                if word == "B" and i > 0 and len(parts[i-1]) == 7: # 예: 2026-04 B
+                    # B 단어 이후 10개 단어 내에서 날짜, 빌드, KB번호 매칭
                     window = parts[i+1 : i+11]
                     for item in window:
-                        if u_date == "-" and re.match(r'^\d{4}-\d{2}-\d{2}$', item): u_date = item
-                        if u_build == "-" and item.startswith("26100."): u_build = item
-                        if u_kb == "-" and item.startswith("KB") and len(item) == 9: u_kb = item
-                    if u_build != "-" and u_kb != "-": break
+                        if u_date == "-" and re.match(r'^\d{4}-\d{2}-\d{2}$', item):
+                            u_date = item
+                        if u_build == "-" and item.startswith("26100."):
+                            u_build = item
+                        if u_kb == "-" and item.startswith("KB") and len(item) == 9:
+                            u_kb = item
+                    if u_build != "-" and u_kb != "-":
+                        break
             
             versions['windows_11_24h2'] = {
                 'version': f"Build {u_build} ({u_kb})",
                 'date': u_date.replace('-', '/')
             }
-    except: versions['windows_11_24h2'] = {'version': '파싱 실패', 'date': '-'}
+    except:
+        versions['windows_11_24h2'] = {'version': '파싱 실패', 'date': '-'}
 
-    # [2] Microsoft Edge
+    # [2] Microsoft Edge (순서 2번)
     try:
         url = "https://learn.microsoft.com/en-us/deployedge/microsoft-edge-relnote-stable-channel"
         res = subprocess.run(f'curl -fsSL "{url}"', shell=True, capture_output=True, text=True, timeout=10)
@@ -54,12 +61,15 @@ def get_latest_versions():
         d_m = re.search(r'([A-Z][a-z]+ \d{1,2}, \d{4})', res.stdout)
         d_str = "-"
         if d_m:
-            try: d_str = datetime.strptime(d_m.group(1).replace(',',''), "%B %d %Y").strftime("%Y/%m/%d")
-            except: d_str = d_m.group(1)
+            try:
+                d_str = datetime.strptime(d_m.group(1).replace(',',''), "%B %d %Y").strftime("%Y/%m/%d")
+            except:
+                d_str = d_m.group(1)
         versions['edge'] = {'version': v_m.group(1) if v_m else "실패", 'date': d_str}
-    except: versions['edge'] = {'version': '오류', 'date': '-'}
+    except:
+        versions['edge'] = {'version': '오류', 'date': '-'}
 
-    # [3] Acrobat Reader
+    # [3] Acrobat Reader (순서 3번)
     try:
         url = "https://helpx.adobe.com/acrobat/release-note/release-notes-acrobat-reader.html"
         res = subprocess.run(f'curl -fsSL "{url}"', shell=True, capture_output=True, text=True, timeout=15)
@@ -67,12 +77,15 @@ def get_latest_versions():
         d_match = re.search(r'([A-Z][a-z]+\s+\d{1,2},\s+\d{4})', res.stdout)
         d_str = "-"
         if d_match:
-            try: d_str = datetime.strptime(d_match.group(1).replace(',', ''), "%B %d %Y").strftime("%Y/%m/%d")
-            except: d_str = d_match.group(1)
+            try:
+                d_str = datetime.strptime(d_match.group(1).replace(',', ''), "%B %d %Y").strftime("%Y/%m/%d")
+            except:
+                d_str = d_match.group(1)
         versions['acrobat_reader'] = {'version': v_match.group(1) if v_match else "실패", 'date': d_str}
-    except: versions['acrobat_reader'] = {'version': '오류', 'date': '-'}
+    except:
+        versions['acrobat_reader'] = {'version': '오류', 'date': '-'}
 
-    # [4] Bandizip
+    # [4] Bandizip (순서 4번)
     try:
         url = "https://www.bandisoft.com/bandizip/history/"
         res = subprocess.run(f'curl -fsSL "{url}"', shell=True, capture_output=True, text=True, timeout=10)
@@ -80,18 +93,22 @@ def get_latest_versions():
         d = re.search(r'class="cell2">([A-Za-z]{3}\s\d{1,2},\s\d{4})<', res.stdout)
         d_str = "-"
         if d:
-            try: d_str = datetime.strptime(d.group(1).strip(), '%b %d, %Y').strftime('%Y/%m/%d')
-            except: d_str = d.group(1)
+            try:
+                d_str = datetime.strptime(d.group(1).strip(), '%b %d, %Y').strftime('%Y/%m/%d')
+            except:
+                d_str = d.group(1)
         versions['bandizip'] = {'version': v.group(1) if v else "실패", 'date': d_str}
-    except: versions['bandizip'] = {'version': '오류', 'date': '-'}
+    except:
+        versions['bandizip'] = {'version': '오류', 'date': '-'}
 
-    # [5] Chrome
+    # [5] Chrome (순서 5번)
     try:
         url = "https://versionhistory.googleapis.com/v1/chrome/platforms/win/channels/stable/versions"
         res = subprocess.run(f'curl -fsSL "{url}"', shell=True, capture_output=True, text=True, timeout=10)
         if res.stdout:
             versions['chrome'] = {'version': json.loads(res.stdout)['versions'][0]['version']}
-    except: versions['chrome'] = {'version': '오류'}
+    except:
+        versions['chrome'] = {'version': '오류'}
 
     return versions
 
@@ -101,18 +118,21 @@ def main():
     
     if os.path.exists(user_data_file):
         with open(user_data_file, 'r', encoding='utf-8') as f:
-            try: user_data = json.load(f)
-            except: user_data = {}
-    else: user_data = {}
+            try:
+                user_data = json.load(f)
+            except:
+                user_data = {}
+    else:
+        user_data = {}
 
     if 'acrobat' in user_data: del user_data['acrobat']
 
     web_data = get_latest_versions() or {}
     changed_keys = []
     
-    # [순서 보장] 요청하신 출력 순서
+    # 요청하신 출력 순서와 내부 로직 순서를 통일함
     display_order = [
-        ('windows_11_24h2', '윈도우 보안 업데이트'),
+        ('windows_11_24h2', 'Windows 11 24H2 보안 업데이트'),
         ('edge', 'Edge'),
         ('acrobat_reader', '아크로뱃리더'),
         ('bandizip', '반디집'),
@@ -124,11 +144,14 @@ def main():
         if not sw_info: continue
         
         latest_v = sw_info.get('version', '')
-        if any(x in latest_v for x in ["오류", "실패", "파싱 실패"]): continue
+        # 유효하지 않은 데이터는 업데이트 감지에서 제외
+        if any(x in latest_v for x in ["오류", "실패", "파싱 실패", "None"]): 
+            continue
 
         current_v = user_data.get(key, {}).get('version', '0')
         if latest_v != current_v:
             changed_keys.append(display_name)
+            # 크롬은 조회일, 나머지는 추출된 배포일 저장
             save_date = today if key == 'chrome' else sw_info.get('date', '-')
             user_data[key] = {"version": latest_v, "date": save_date}
 
