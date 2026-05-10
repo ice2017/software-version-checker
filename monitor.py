@@ -19,39 +19,37 @@ def send_telegram_msg(message):
 def get_latest_versions():
     versions = {}
     
-    # [1] Windows 11 24H2 보안 업데이트 (순서 1번)
+    # [1] Windows 11 24H2 보안 업데이트
     try:
-        # 터미널에서 성공했던 로직: HTML 태그 제거 및 공백 압축까지만 쉘에서 처리
-        cmd = (
-            'curl -fsSL "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information" | '
-            'sed -n "/24H2/,$p" | sed "s/<[^>]*>/ /g" | tr -s " "'
-        )
-        res = subprocess.check_output(cmd, shell=True, text=True, stderr=subprocess.DEVNULL)
-        
-        if res:
-            parts = res.split()
-            u_date, u_build, u_kb = "-", "-", "-"
-            # 'B' (보안 업데이트 타입) 지점을 찾고 그 주변 데이터 추출
-            for i, word in enumerate(parts):
-                if word == "B" and i > 0 and len(parts[i-1]) == 7: # 예: 2026-04 B
-                    # B 단어 이후 10개 단어 내에서 날짜, 빌드, KB번호 매칭
-                    window = parts[i+1 : i+11]
-                    for item in window:
-                        if u_date == "-" and re.match(r'^\d{4}-\d{2}-\d{2}$', item):
-                            u_date = item
-                        if u_build == "-" and item.startswith("26100."):
-                            u_build = item
-                        if u_kb == "-" and item.startswith("KB") and len(item) == 9:
-                            u_kb = item
-                    if u_build != "-" and u_kb != "-":
-                        break
-            
+        url = "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information"
+        response = requests.get(url, timeout=15)
+        # HTML 태그 제거 및 텍스트 정규화
+        content = re.sub(r'<[^>]*>', ' ', response.text)
+        content = re.sub(r'\s+', ' ', content)
+
+        # 24H2 섹션 이후의 데이터만 추출 (범위 제한)
+        start_idx = content.find("24H2")
+        target_text = content[start_idx : start_idx + 2000] if start_idx != -1 else content
+
+        # 데이터 패턴 매칭
+        # - 날짜: YYYY-MM-DD
+        # - 빌드: 26100.xxxx
+        # - KB: KB1234567
+        u_date = re.search(r'(\d{4}-\d{2}-\d{2})', target_text)
+        u_build = re.search(r'(26100\.\d+)', target_text)
+        u_kb = re.search(r'(KB\d{7})', target_text)
+
+        if u_build and u_kb:
             versions['windows_11_24h2'] = {
-                'version': f"Build {u_build} ({u_kb})",
-                'date': u_date.replace('-', '/')
+                'version': f"Build {u_build.group(1)} ({u_kb.group(1)})",
+                'date': u_date.group(1).replace('-', '/') if u_date else "-"
             }
-    except:
-        versions['windows_11_24h2'] = {'version': '파싱 실패', 'date': '-'}
+        else:
+            # 패턴 매칭 실패 시 수동 파싱 시도 (비상용)
+            versions['windows_11_24h2'] = {'version': '데이터 매칭 실패', 'date': '-'}
+            
+    except Exception as e:
+        versions['windows_11_24h2'] = {'version': f'파싱 오류: {str(e)}', 'date': '-'}
 
     # [2] Microsoft Edge (순서 2번)
     try:
