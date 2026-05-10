@@ -67,24 +67,37 @@ def get_latest_versions():
             versions['acrobat_reader'] = {'version': v_match.group(1) if v_match else "실패", 'date': d_str}
     except: versions['acrobat_reader'] = {'version': '오류', 'date': '-'}
 
-    # 5. Windows 11 24H2
+    # 5. Windows 11 24H2 (인덱스 탐색 방식 - 가장 확실함)
     try:
         url = "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information"
         res = subprocess.run(f'curl -fsSL "{url}"', shell=True, capture_output=True, text=True, timeout=15)
         if res.stdout:
             content_24h2 = res.stdout.split("24H2")[-1]
-            clean_text = ' '.join(re.sub(r'<[^>]*>', ' ', content_24h2).split())
-            pattern = r'(\d{4}-\d{2}\s+B)\s+(\d{4}-\d{2}-\d{2})\s+(26100\.\d+)\s+(KB\d{7})'
-            match = re.search(pattern, clean_text)
+            # 태그 제거 후 순수 텍스트 행 리스트 생성
+            lines = [l.strip() for l in re.sub(r'<[^>]*>', '\n', content_24h2).split('\n') if l.strip()]
             
-            if match:
-                u_type, u_date, u_build, u_kb = match.groups()
-                versions['windows_11_24h2'] = {
-                    'version': f"Build {u_build} ({u_kb})",
-                    'date': u_date.replace('-', '/')
-                }
-            else:
-                versions['windows_11_24h2'] = {'version': '매칭 실패', 'date': '-'}
+            u_date, u_build, u_kb = "-", "-", "-"
+            
+            for i, line in enumerate(lines):
+                # '2026-04 B' 와 같은 패턴을 찾음
+                if re.search(r'\d{4}-\d{2}\s+B$', line):
+                    # 찾은 위치 근처(아래로 5줄 이내)에서 날짜, 빌드, KB를 각각 찾음
+                    search_range = lines[i:i+6]
+                    for item in search_range:
+                        if u_date == "-" and re.match(r'^\d{4}-\d{2}-\d{2}$', item):
+                            u_date = item
+                        if u_build == "-" and re.match(r'^26100\.\d+$', item):
+                            u_build = item
+                        if u_kb == "-" and re.match(r'^KB\d{7}$', item):
+                            u_kb = item
+                    
+                    if u_build != "-" and "26100" in u_build:
+                        break # 최신 B타입 데이터를 찾았으므로 종료
+            
+            versions['windows_11_24h2'] = {
+                'version': f"Build {u_build} ({u_kb})" if u_kb != "-" else f"Build {u_build}",
+                'date': u_date.replace('-', '/')
+            }
     except:
         versions['windows_11_24h2'] = {'version': '오류', 'date': '-'}
 
