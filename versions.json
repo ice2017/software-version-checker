@@ -4,19 +4,19 @@
         "date": "2026/05/05"
     },
     "edge": {
-        "version": "148.0.3967.54",
+        "version": "-",
         "date": "2026/05/07"
     },
     "bandizip": {
-        "version": "7.43",
+        "version": "-",
         "date": "2026/05/04"
     },
     "acrobat_reader": {
-        "version": "26.001.21529",
+        "version": "-",
         "date": "2026/05/01"
     },
     "windows_11_24h2": {
-        "version": "Build 26100.2240 (KB5046696)",
-        "date": "2024/11/12"
+        "version": "-",
+        "date": "-"
     }
 }
