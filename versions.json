@@ -18,5 +18,9 @@
     "acrobat_reader": {
         "version": "26.001.21529",
         "date": "2026/05/01"
+    },
+    "windows_11_24h2": {
+        "version": "Build 26100.8328 (KB5083806)",
+        "date": "-"
     }
 }
