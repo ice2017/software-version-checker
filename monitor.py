@@ -14,8 +14,8 @@ def send_telegram_msg(message):
         payload = {'chat_id': chat_id, 'text': message}
         try:
             requests.post(url, json=payload, timeout=10)
-        except Exception as e:
-            pass # 전송 실패 시 무시
+        except:
+            pass
 
 def get_latest_versions():
     versions = {}
@@ -26,8 +26,7 @@ def get_latest_versions():
         res = subprocess.run(f'curl -fsSL "{url}"', shell=True, capture_output=True, text=True, timeout=10)
         if res.stdout:
             versions['chrome'] = {'version': json.loads(res.stdout)['versions'][0]['version']}
-    except:
-        versions['chrome'] = {'version': 'API 오류'}
+    except: versions['chrome'] = {'version': '오류'}
 
     # 2. Microsoft Edge
     try:
@@ -41,8 +40,7 @@ def get_latest_versions():
                 try: d_str = datetime.strptime(d_m.group(1).replace(',',''), "%B %d %Y").strftime("%Y/%m/%d")
                 except: pass
             versions['edge'] = {'version': v_m.group(1) if v_m else "실패", 'date': d_str}
-    except:
-        versions['edge'] = {'version': '연결 실패', 'date': '-'}
+    except: versions['edge'] = {'version': '오류', 'date': '-'}
 
     # 3. Bandizip
     try:
@@ -53,58 +51,45 @@ def get_latest_versions():
             match = re.search(pattern, res.stdout)
             if match:
                 v = match.group(1).strip()
-                d_raw = match.group(2).strip()
-                try:
-                    dt = datetime.strptime(d_raw, '%b %d, %Y')
-                    d = dt.strftime('%Y/%m/%d')
-                except: d = d_raw
+                try: d = datetime.strptime(match.group(2).strip(), '%b %d, %Y').strftime('%Y/%m/%d')
+                except: d = match.group(2)
                 versions['bandizip'] = {'version': v, 'date': d}
-    except:
-        versions['bandizip'] = {'version': '연결 실패', 'date': '-'}
+    except: versions['bandizip'] = {'version': '오류', 'date': '-'}
 
-    # 4. Acrobat Reader (사용자 검증 curl 주소 및 37번 라인 패턴 반영)
+    # 4. Acrobat Reader (보내주신 소스 37번 라인 기반)
     try:
         url = "https://helpx.adobe.com/acrobat/release-note/release-notes-acrobat-reader.html"
         res = subprocess.run(f'curl -fsSL "{url}"', shell=True, capture_output=True, text=True, timeout=15)
-        html_source = res.stdout
-        if html_source:
-            # title="26.001.21529" 패턴 추출
-            v_match = re.search(r'title="(\d{2}\.\d{3}\.\d{5})', html_source)
-            d_match = re.search(r'([A-Z][a-z]+\s+\d{1,2},\s+\d{4})', html_source)
+        if res.stdout:
+            v_match = re.search(r'title="(\d{2}\.\d{3}\.\d{5})', res.stdout)
+            d_match = re.search(r'([A-Z][a-z]+\s+\d{1,2},\s+\d{4})', res.stdout)
             d_str = "-"
             if d_match:
-                try:
-                    d_raw = d_match.group(1).replace(',', '')
-                    d_str = datetime.strptime(d_raw, "%B %d %Y").strftime("%Y/%m/%d")
+                try: d_str = datetime.strptime(d_match.group(1).replace(',', ''), "%B %d %Y").strftime("%Y/%m/%d")
                 except: d_str = d_match.group(1)
-            versions['acrobat_reader'] = {'version': v_match.group(1) if v_match else "파싱 실패", 'date': d_str}
-    except:
-        versions['acrobat_reader'] = {'version': '실행 오류', 'date': '-'}
+            versions['acrobat_reader'] = {'version': v_match.group(1) if v_match else "실패", 'date': d_str}
+    except: versions['acrobat_reader'] = {'version': '오류', 'date': '-'}
 
-    # 5. Windows 11 24H2 보안 업데이트
+    # 5. Windows 11 24H2 (보안 업데이트 KB 및 빌드)
     try:
         url = "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information"
-        # 보안 정책 우회를 위해 curl 사용
         res = subprocess.run(f'curl -fsSL "{url}"', shell=True, capture_output=True, text=True, timeout=10)
         if res.stdout:
-            # 24H2 섹션 근처에서 가장 상단의 빌드 번호와 KB 번호 추출
-            # 패턴: 빌드 번호 (26100으로 시작) 및 KB5로 시작하는 번호 매칭
+            # 24H2 섹션에서 가장 최신 빌드(26100으로 시작)와 KB 번호 추출
             build_match = re.search(r'26100\.\d+', res.stdout)
             kb_match = re.search(r'KB\d{7}', res.stdout)
-            
-            # 날짜 추출 (페이지 상단의 최신 업데이트 날짜)
+            # 날짜 추출 (문서 내 최신 업데이트 날짜)
             d_match = re.search(r'([A-Z][a-z]+ \d{1,2}, \d{4})', res.stdout)
             d_str = "-"
             if d_match:
                 try: d_str = datetime.strptime(d_match.group(1).replace(',',''), "%B %d %Y").strftime("%Y/%m/%d")
                 except: pass
-                
-            versions['windows_11_24h2'] = {
-                'version': f"Build {build_match.group(0)} ({kb_match.group(0)})" if build_match and kb_match else "추출 실패",
-                'date': d_str
-            }
-    except:
-        versions['windows_11_24h2'] = {'version': '연결 실패', 'date': '-'}
+            
+            ver_str = f"Build {build_match.group(0)}" if build_match else "실패"
+            if kb_match: ver_str += f" ({kb_match.group(0)})"
+            
+            versions['windows_11_24h2'] = {'version': ver_str, 'date': d_str}
+    except: versions['windows_11_24h2'] = {'version': '오류', 'date': '-'}
 
     return versions
 
@@ -115,14 +100,16 @@ def main():
     if os.path.exists(user_data_file):
         with open(user_data_file, 'r', encoding='utf-8') as f:
             user_data = json.load(f)
-    else:
-        user_data = {}
+    else: user_data = {}
 
     web_data = get_latest_versions()
     changed_keys = []
+    
+    # 체크할 대상 리스트
+    targets = ['chrome', 'edge', 'bandizip', 'acrobat_reader', 'windows_11_24h2']
 
-    for name in ['chrome', 'edge', 'bandizip', 'acrobat_reader', 'windows_11_24h2']:
-        if name in web_data and "실패" not in web_data[name].get('version', '') and "오류" not in web_data[name].get('version', ''):
+    for name in targets:
+        if name in web_data and "오류" not in web_data[name]['version'] and "실패" not in web_data[name]['version']:
             latest_v = web_data[name]['version']
             current_v = user_data.get(name, {}).get('version', '0')
             
@@ -131,12 +118,12 @@ def main():
                 save_date = today if name == 'chrome' else web_data[name].get('date', '-')
                 user_data[name] = {"version": latest_v, "date": save_date}
 
-    # 업데이트가 감지되었을 때만 텔레그램 전송
+    # 업데이트가 감지되었을 때만 텔레그램 전송 (화면 출력 없음)
     if changed_keys:
         report = "🔔 [S/W 업데이트 모니터링 최종 정합성 리포트]\n\n"
         report += f"🚀 업데이트 감지: {', '.join(changed_keys)}\n\n"
         report += "━━━━━ 현재 전체 현황 ━━━━━\n"
-        for sw in ['chrome', 'edge', 'bandizip', 'acrobat_reader']:
+        for sw in targets:
             info = user_data.get(sw, {"version": "데이터 없음", "date": "-"})
             mark = "✅" if sw.upper().replace('_', ' ') in changed_keys else "ℹ️"
             date_label = "조회 날짜" if sw == 'chrome' else "날짜"
@@ -146,7 +133,7 @@ def main():
         
         send_telegram_msg(report)
         
-        # 새로운 버전 정보 파일 저장
+        # 파일 업데이트
         with open(user_data_file, 'w', encoding='utf-8') as f:
             json.dump(user_data, f, ensure_ascii=False, indent=4)
 
