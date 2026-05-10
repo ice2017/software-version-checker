@@ -81,6 +81,31 @@ def get_latest_versions():
     except:
         versions['acrobat_reader'] = {'version': '실행 오류', 'date': '-'}
 
+    # 5. Windows 11 24H2 보안 업데이트
+    try:
+        url = "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information"
+        # 보안 정책 우회를 위해 curl 사용
+        res = subprocess.run(f'curl -fsSL "{url}"', shell=True, capture_output=True, text=True, timeout=10)
+        if res.stdout:
+            # 24H2 섹션 근처에서 가장 상단의 빌드 번호와 KB 번호 추출
+            # 패턴: 빌드 번호 (26100으로 시작) 및 KB5로 시작하는 번호 매칭
+            build_match = re.search(r'26100\.\d+', res.stdout)
+            kb_match = re.search(r'KB\d{7}', res.stdout)
+            
+            # 날짜 추출 (페이지 상단의 최신 업데이트 날짜)
+            d_match = re.search(r'([A-Z][a-z]+ \d{1,2}, \d{4})', res.stdout)
+            d_str = "-"
+            if d_match:
+                try: d_str = datetime.strptime(d_match.group(1).replace(',',''), "%B %d %Y").strftime("%Y/%m/%d")
+                except: pass
+                
+            versions['windows_11_24h2'] = {
+                'version': f"Build {build_match.group(0)} ({kb_match.group(0)})" if build_match and kb_match else "추출 실패",
+                'date': d_str
+            }
+    except:
+        versions['windows_11_24h2'] = {'version': '연결 실패', 'date': '-'}
+
     return versions
 
 def main():
@@ -96,7 +121,7 @@ def main():
     web_data = get_latest_versions()
     changed_keys = []
 
-    for name in ['chrome', 'edge', 'bandizip', 'acrobat_reader']:
+    for name in ['chrome', 'edge', 'bandizip', 'acrobat_reader', 'windows_11_24h2']:
         if name in web_data and "실패" not in web_data[name].get('version', '') and "오류" not in web_data[name].get('version', ''):
             latest_v = web_data[name]['version']
             current_v = user_data.get(name, {}).get('version', '0')
