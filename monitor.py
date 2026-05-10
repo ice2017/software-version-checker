@@ -5,17 +5,14 @@ import subprocess
 import requests
 from datetime import datetime
 
-# 텔레그램 전송 함수
 def send_telegram_msg(message):
     token = os.environ.get('TELEGRAM_TOKEN')
     chat_id = os.environ.get('TELEGRAM_CHAT_ID')
     if token and chat_id:
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         payload = {'chat_id': chat_id, 'text': message}
-        try:
-            requests.post(url, json=payload, timeout=10)
-        except:
-            pass
+        try: requests.post(url, json=payload, timeout=10)
+        except: pass
 
 def get_latest_versions():
     versions = {}
@@ -56,14 +53,12 @@ def get_latest_versions():
                 versions['bandizip'] = {'version': v, 'date': d}
     except: versions['bandizip'] = {'version': '오류', 'date': '-'}
 
-    # 4. Acrobat Reader (보내주신 helpx 소스 37번 라인 기반)
+    # 4. Acrobat Reader (사용자 curl 소스 기반 고정)
     try:
         url = "https://helpx.adobe.com/acrobat/release-note/release-notes-acrobat-reader.html"
         res = subprocess.run(f'curl -fsSL "{url}"', shell=True, capture_output=True, text=True, timeout=15)
         if res.stdout:
-            # v_match: title="26.001.21529" 추출
             v_match = re.search(r'title="(\d{2}\.\d{3}\.\d{5})', res.stdout)
-            # d_match: "May 01, 2026" 추출
             d_match = re.search(r'([A-Z][a-z]+\s+\d{1,2},\s+\d{4})', res.stdout)
             d_str = "-"
             if d_match:
@@ -72,53 +67,34 @@ def get_latest_versions():
             versions['acrobat_reader'] = {'version': v_match.group(1) if v_match else "실패", 'date': d_str}
     except: versions['acrobat_reader'] = {'version': '오류', 'date': '-'}
 
-# 5. Windows 11 24H2 (보안 업데이트 및 실제 출시일 추출)
+    # 5. Windows 11 24H2 (B 타입 보안 업데이트 정밀 파싱)
     try:
         url = "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information"
-        # Rocky 9의 curl을 사용하여 차단 우회
-        res = subprocess.run(f'curl -fsSL "{url}"', shell=True, capture_output=True, text=True, timeout=10)
-        
+        res = subprocess.run(f'curl -fsSL "{url}"', shell=True, capture_output=True, text=True, timeout=15)
         if res.stdout:
-            # 24H2 섹션 이후만 남김
-            content_24h2 = res.stdout.split("24H2")[-1] 
+            # 24H2 섹션 이후 데이터 추출
+            content_24h2 = res.stdout.split("24H2")[-1]
             
-            # 빌드 번호(26100.xxxx)를 기준으로 텍스트를 쪼개어 표 내부 데이터에 접근
-            # 첫 번째 빌드 번호가 적힌 주변 텍스트에서 KB와 날짜를 찾음
-            builds = re.findall(r'26100\.\d+', content_24h2)
-            kbs = re.findall(r'KB\d{7}', content_24h2)
+            # 정규표현식 설명:
+            # (\d{4}-\d{2} B) : "2026-04 B" 같은 타입을 찾음
+            # .*?(\d{4}-\d{2}-\d{2}) : 그 뒤에 오는 첫 번째 날짜 추출
+            # .*?(26100\.\d+) : 그 뒤에 오는 빌드 번호 추출
+            # .*?(KB\d{7}) : 그 뒤에 오는 KB 번호 추출
+            pattern = r'(\d{4}-\d{2}\sB).*?(\d{4}-\d{2}-\d{2}).*?(26100\.\d+).*?(KB\d{7})'
+            b_updates = re.findall(pattern, content_24h2, re.DOTALL)
             
-            # 날짜 패턴 (YYYY-MM-DD 또는 영문 날짜)
-            # 지원 종료일 같은 미래 날짜를 피하기 위해 2024~2026년 범위로 한정
-            dates = re.findall(r'202[4-6]-\d{2}-\d{2}|[A-Z][a-z]+ \d{1,2}, \d{4}', content_24h2)
-            
-            # 데이터 정합성 체크: 빌드 번호가 나온 지점 이후의 첫 번째 날짜가 실제 출시일임
-            latest_build = builds[0] if builds else "추출 실패"
-            latest_kb = kbs[0] if kbs else ""
-            
-            # 지원 종료일(상단)이 아닌 실제 업데이트 날짜(표 내부)를 가져오기 위해 
-            # 보통 빌드/KB 번호 근처에 있는 날짜를 선택 (결과 리스트에서 적절한 인덱스 탐색)
-            d_str = "-"
-            if dates:
-                # 리스트를 돌며 오늘 날짜보다 미래가 아닌 첫 번째 날짜 선택
-                for d_raw in dates:
-                    clean_d = d_raw.replace(',', '')
-                    try:
-                        if '-' in clean_d: # YYYY-MM-DD
-                            dt = datetime.strptime(clean_d, "%Y-%m-%d")
-                        else: # May 01, 2026
-                            dt = datetime.strptime(clean_d, "%B %d %Y")
-                        
-                        # 미래 날짜(예: 2028년 지원종료일)가 아니면 선택
-                        if dt <= datetime.now():
-                            d_str = dt.strftime("%Y/%m/%d")
-                            break
-                    except: continue
-
-            versions['windows_11_24h2'] = {
-                'version': f"Build {latest_build} ({latest_kb})" if latest_kb else f"Build {latest_build}",
-                'date': d_str
-            }
-    except Exception as e:
+            if b_updates:
+                # findall 결과 중 가장 첫 번째 것이 가장 최신 B 타입 업데이트
+                latest_b = b_updates[0]
+                u_type, u_date, u_build, u_kb = latest_b
+                
+                versions['windows_11_24h2'] = {
+                    'version': f"Build {u_build} ({u_kb})",
+                    'date': u_date.replace('-', '/')
+                }
+            else:
+                versions['windows_11_24h2'] = {'version': 'B타입 추출 실패', 'date': '-'}
+    except:
         versions['windows_11_24h2'] = {'version': '오류', 'date': '-'}
 
     return versions
@@ -132,14 +108,11 @@ def main():
             user_data = json.load(f)
     else: user_data = {}
 
-    # acrobat_reader로 키를 통일하기 위해 기존 acrobat 키 제거 (정리 로직)
-    if 'acrobat' in user_data:
-        del user_data['acrobat']
+    # 이전 키값 정리
+    if 'acrobat' in user_data: del user_data['acrobat']
 
     web_data = get_latest_versions()
     changed_keys = []
-    
-    # 순서 보장을 위한 대상 리스트
     targets = ['chrome', 'edge', 'bandizip', 'acrobat_reader', 'windows_11_24h2']
 
     for name in targets:
@@ -165,8 +138,6 @@ def main():
             report += f"- {date_label}: {info['date']}\n\n"
         
         send_telegram_msg(report)
-        
-        # 파일 저장
         with open(user_data_file, 'w', encoding='utf-8') as f:
             json.dump(user_data, f, ensure_ascii=False, indent=4)
 
