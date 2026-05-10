@@ -98,37 +98,52 @@ def main():
     
     if os.path.exists(user_data_file):
         with open(user_data_file, 'r', encoding='utf-8') as f:
-            user_data = json.load(f)
-    else: user_data = {}
+            try:
+                user_data = json.load(f)
+            except:
+                user_data = {}
+    else:
+        user_data = {}
 
+    # 구형 키 정리
     if 'acrobat' in user_data: del user_data['acrobat']
 
     web_data = get_latest_versions()
     changed_keys = []
+    # 모니터링 대상 리스트
     targets = ['chrome', 'edge', 'bandizip', 'acrobat_reader', 'windows_11_24h2']
 
     for name in targets:
-        if name in web_data and "오류" not in web_data[name].get('version', '') and "실패" not in web_data[name].get('version', ''):
-            latest_v = web_data[name]['version']
-            current_v = user_data.get(name, {}).get('version', '0')
+        # 1. 데이터가 존재하고 딕셔너리 형태인지 확인 (Null Check)
+        sw_info = web_data.get(name)
+        if not sw_info or not isinstance(sw_info, dict):
+            continue
             
-            # 버전이 '-'인 경우도 업데이트 감지에서 제외
-            if latest_v != "-" and latest_v != current_v:
-                changed_keys.append(name.upper().replace('_', ' '))
-                save_date = today if name == 'chrome' else web_data[name].get('date', '-')
-                user_data[name] = {"version": latest_v, "date": save_date}
+        latest_v = sw_info.get('version', '')
+        
+        # 2. '오류', '실패', '-' 등 유효하지 않은 값 필터링
+        if any(x in latest_v for x in ["오류", "실패", "-", "None"]):
+            continue
+
+        current_v = user_data.get(name, {}).get('version', '0')
+        
+        # 3. 버전 업데이트 감지
+        if latest_v != current_v:
+            changed_keys.append(name.upper().replace('_', ' '))
+            # 크롬은 조회일 사용, 나머지는 추출된 날짜 사용
+            save_date = today if name == 'chrome' else sw_info.get('date', '-')
+            user_data[name] = {"version": latest_v, "date": save_date}
 
     if changed_keys:
-        report = "🔔 [S/W 업데이트 모니터링 최종 정합성 리포트]\n\n"
+        report = "🔔 [S/W 업데이트 모니터링 리포트]\n\n"
         report += f"🚀 업데이트 감지: {', '.join(changed_keys)}\n\n"
         report += "━━━━━ 현재 전체 현황 ━━━━━\n"
         for sw in targets:
             info = user_data.get(sw, {"version": "데이터 없음", "date": "-"})
             mark = "✅" if sw.upper().replace('_', ' ') in changed_keys else "ℹ️"
-            date_label = "조회 날짜" if sw == 'chrome' else "날짜"
             report += f"{mark} {sw.upper().replace('_', ' ')}\n"
-            report += f"- 버전: {info['version']}\n"
-            report += f"- {date_label}: {info['date']}\n\n"
+            report += f"- 버전: {info.get('version', '데이터 없음')}\n"
+            report += f"- 날짜: {info.get('date', '-')}\n\n"
         
         send_telegram_msg(report)
         with open(user_data_file, 'w', encoding='utf-8') as f:
