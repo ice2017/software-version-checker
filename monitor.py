@@ -67,39 +67,30 @@ def get_latest_versions():
             versions['acrobat_reader'] = {'version': v_match.group(1) if v_match else "실패", 'date': d_str}
     except: versions['acrobat_reader'] = {'version': '오류', 'date': '-'}
 
-    # 5. Windows 11 24H2 (B타입 최신 업데이트 - 탐색 범위 대폭 확장)
+    # 5. Windows 11 24H2 (터미널 검증 로직 이식)
     try:
         url = "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information"
         res = subprocess.run(f'curl -fsSL "{url}"', shell=True, capture_output=True, text=True, timeout=15)
         if res.stdout:
+            # 24H2 섹션 분리
             content_24h2 = res.stdout.split("24H2")[-1]
-            # 태그를 제거하고 모든 줄바꿈과 공백을 정리하여 리스트화
-            clean_text = re.sub(r'<[^>]*>', '\n', content_24h2)
-            lines = [l.strip() for l in clean_text.split('\n') if l.strip()]
+            # 태그 제거 및 줄바꿈/연속공백을 단일 공백으로 통합 (터미널의 tr -d '\n' 효과)
+            clean_text = ' '.join(re.sub(r'<[^>]*>', ' ', content_24h2).split())
+
+            # 터미널에서 성공한 정규표현식 패턴
+            pattern = r'(\d{4}-\d{2}\s+B)\s+(\d{4}-\d{2}-\d{2})\s+(26100\.\d+)\s+(KB\d{7})'
+            match = re.search(pattern, clean_text)
             
-            u_type, u_date, u_build, u_kb = "-", "-", "-", "-"
-            
-            for i, line in enumerate(lines):
-                # '2026-04 B' 또는 단순히 ' B'로 끝나는 업데이트 타입 행 찾기
-                if re.search(r'\d{4}-\d{2}\s+B$', line) or line.endswith(" B"):
-                    # 찾은 지점부터 아래로 15줄까지 훑으며 데이터 매칭
-                    search_range = lines[i:i+15]
-                    temp_date = next((l for l in search_range if re.match(r'^\d{4}-\d{2}-\d{2}$', l)), "-")
-                    temp_build = next((l for l in search_range if re.match(r'^26100\.\d+$', l)), "-")
-                    temp_kb = next((l for l in search_range if re.match(r'^KB\d{7}$', l)), "-")
-                    
-                    # 26100 빌드를 찾았다면 이것이 우리가 찾는 LTSC/최신 보안 패치임
-                    if temp_build != "-" and "26100" in temp_build:
-                        u_date, u_build, u_kb = temp_date, temp_build, temp_kb
-                        break
-            
-            versions['windows_11_24h2'] = {
-                'version': f"Build {u_build} ({u_kb})" if u_kb != "-" else f"Build {u_build}",
-                'date': u_date.replace('-', '/') if u_date != "-" else "-"
-            }
+            if match:
+                u_type, u_date, u_build, u_kb = match.groups()
+                versions['windows_11_24h2'] = {
+                    'version': f"Build {u_build} ({u_kb})",
+                    'date': u_date.replace('-', '/')
+                }
+            else:
+                versions['windows_11_24h2'] = {'version': '매칭 실패', 'date': '-'}
     except:
         versions['windows_11_24h2'] = {'version': '오류', 'date': '-'}
-    return versions
 
 def main():
     user_data_file = "versions.json"
