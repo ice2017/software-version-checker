@@ -17,37 +17,60 @@ def send_telegram_msg(message):
 def get_latest_versions():
     versions = {}
     
-    # [순서 변경 1] Windows 11 24H2 (가장 먼저 수행)
+# [순서 변경 1] Windows 11 24H2 (가장 확실한 물리적 파싱)
     try:
-        # 터미널 성공 로직을 파이썬 쉘에서 안전하게 실행하기 위해 구조화
+        # 정규표현식(grep)을 쓰지 않고, 텍스트만 뽑아서 파이썬으로 가져옵니다.
         shell_cmd = (
             'curl -fsSL "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information" | '
             'sed -n "/24H2/,$p" | '
             'sed "s/<[^>]*>/ /g" | '
-            'tr -d "\\n" | tr -s " "'
+            'tr -s " "'
         )
         res = subprocess.run(shell_cmd, shell=True, capture_output=True, text=True, timeout=20)
         
         if res.stdout:
-            text = res.stdout.strip()
-            parts = text.split()
+            parts = res.stdout.split()
             u_date, u_build, u_kb = "-", "-", "-"
             
-            for i in range(len(parts)):
-                # 'B' 업데이트 지점 탐색
-                if parts[i] == 'B' and i > 0 and '-' in parts[i-1]:
-                    window = parts[i+1 : i+11]
-                    for item in window:
-                        if u_date == "-" and re.match(r'^\d{4}-\d{2}-\d{2}$', item): u_date = item
-                        if u_build == "-" and "26100." in item: u_build = item
-                        if u_kb == "-" and "KB" in item and len(item) == 9: u_kb = item
-                    if u_build != "-" and u_kb != "-": break
+            # 텍스트 전체를 돌면서 우리가 원하는 조각들을 찾습니다.
+            for i, word in enumerate(parts):
+                # 1. 'B'를 찾았고, 바로 앞 단어가 '2026-04' 같은 형식인지 확인
+                if word == "B" and i > 0 and len(parts[i-1]) == 7 and parts[i-1].startswith("202"):
+                    # 2. 'B' 지점부터 뒤로 15개 단어 안에 우리가 원하는 데이터가 있는지 검사
+                    sub_range = parts[i+1 : i+16]
+                    for item in sub_range:
+                        # 날짜 형식 (2026-04-14)
+                        if u_date == "-" and re.match(r'^\d{4}-\d{2}-\d{2}$', item):
+                            u_date = item
+                        # 빌드 형식 (26100.8246)
+                        if u_build == "-" and item.startswith("26100."):
+                            u_build = item
+                        # KB 형식 (KB5083769)
+                        if u_kb == "-" and item.startswith("KB") and len(item) >= 9:
+                            u_kb = item
+                    
+                    if u_build != "-" and u_kb != "-":
+                        break
             
+            # 만약 위 루프에서 못 찾았다면, 26100 빌드번호를 기준으로 다시 한 번 역추적
+            if u_build == "-":
+                for i, word in enumerate(parts):
+                    if word.startswith("26100."):
+                        u_build = word
+                        # 주변에서 KB 찾기
+                        for near in parts[max(0, i-5) : i+5]:
+                            if near.startswith("KB"): u_kb = near
+                            if re.match(r'^\d{4}-\d{2}-\d{2}$', near): u_date = near
+                        break
+
             versions['windows_11_24h2'] = {
                 'version': f"Build {u_build} ({u_kb})",
                 'date': u_date.replace('-', '/')
             }
-    except: versions['windows_11_24h2'] = {'version': '오류', 'date': '-'}
+        else:
+            versions['windows_11_24h2'] = {'version': '데이터 추출 실패', 'date': '-'}
+    except Exception as e:
+        versions['windows_11_24h2'] = {'version': f'오류: {str(e)}', 'date': '-'}
 
     # [순서 변경 2] Microsoft Edge
     try:
@@ -116,7 +139,7 @@ def main():
 
     # 출력 및 처리 순서 정의
     display_order = [
-        ('windows_11_24h2', '윈도우 보안 업데이트'),
+        ('windows_11_24h2', 'Windows 11 24H2 보안 업데이트'),
         ('edge', 'Edge'),
         ('acrobat_reader', '아크로뱃리더'),
         ('bandizip', '반디집'),
