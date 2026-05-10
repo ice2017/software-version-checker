@@ -4,8 +4,9 @@
     "date": "2026/05/05"
   },
   "edge": {
-    "version": "148.0.3967.00",
-    "date": "2026/04/05"
+    "version": "148.0.3967.54",
+    "date": "May 07, 2026",
+    "note": "Edge Stable Release"
   },
   "acrobat": {
     "version": "2600121500",
