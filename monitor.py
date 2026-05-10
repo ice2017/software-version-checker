@@ -67,41 +67,35 @@ def get_latest_versions():
             versions['acrobat_reader'] = {'version': v_match.group(1) if v_match else "실패", 'date': d_str}
     except: versions['acrobat_reader'] = {'version': '오류', 'date': '-'}
 
-    # 5. Windows 11 24H2 (인덱스 탐색 방식 - 가장 확실함)
+    # 5. Windows 11 24H2 (터미널 성공 명령어 로직 완벽 이식)
     try:
         url = "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information"
         res = subprocess.run(f'curl -fsSL "{url}"', shell=True, capture_output=True, text=True, timeout=15)
         if res.stdout:
+            # 24H2 섹션 분리
             content_24h2 = res.stdout.split("24H2")[-1]
-            # 태그 제거 후 순수 텍스트 행 리스트 생성
-            lines = [l.strip() for l in re.sub(r'<[^>]*>', '\n', content_24h2).split('\n') if l.strip()]
             
-            u_date, u_build, u_kb = "-", "-", "-"
+            # [터미널 로직] sed 's/<[^>]*>/ /g' | tr -d '\n' | tr -s ' '
+            clean_text = re.sub(r'<[^>]*>', ' ', content_24h2) # 태그를 공백으로
+            clean_text = clean_text.replace('\n', ' ')        # 줄바꿈 제거 (tr -d '\n' 효과)
+            clean_text = ' '.join(clean_text.split())         # 중복 공백 압축 (tr -s ' ' 효과)
+
+            # [터미널 로직] grep -oP '\d{4}-\d{2}\sB\s\d{4}-\d{2}-\d{2}\s26100\.[0-9]+\sKB[0-9]{7}'
+            pattern = r'(\d{4}-\d{2})\sB\s(\d{4}-\d{2}-\d{2})\s(26100\.[0-9]+)\s(KB[0-9]{7})'
+            match = re.search(pattern, clean_text)
             
-            for i, line in enumerate(lines):
-                # '2026-04 B' 와 같은 패턴을 찾음
-                if re.search(r'\d{4}-\d{2}\s+B$', line):
-                    # 찾은 위치 근처(아래로 5줄 이내)에서 날짜, 빌드, KB를 각각 찾음
-                    search_range = lines[i:i+6]
-                    for item in search_range:
-                        if u_date == "-" and re.match(r'^\d{4}-\d{2}-\d{2}$', item):
-                            u_date = item
-                        if u_build == "-" and re.match(r'^26100\.\d+$', item):
-                            u_build = item
-                        if u_kb == "-" and re.match(r'^KB\d{7}$', item):
-                            u_kb = item
-                    
-                    if u_build != "-" and "26100" in u_build:
-                        break # 최신 B타입 데이터를 찾았으므로 종료
-            
-            versions['windows_11_24h2'] = {
-                'version': f"Build {u_build} ({u_kb})" if u_kb != "-" else f"Build {u_build}",
-                'date': u_date.replace('-', '/')
-            }
+            if match:
+                u_type_month, u_date, u_build, u_kb = match.groups()
+                versions['windows_11_24h2'] = {
+                    'version': f"Build {u_build} ({u_kb})",
+                    'date': u_date.replace('-', '/')
+                }
+            else:
+                versions['windows_11_24h2'] = {'version': '매칭 실패', 'date': '-'}
     except:
         versions['windows_11_24h2'] = {'version': '오류', 'date': '-'}
 
-    return versions # [핵심 수정] None 반환 방지를 위해 반드시 필요
+    return versions
 
 def main():
     user_data_file = "versions.json"
@@ -115,11 +109,10 @@ def main():
 
     if 'acrobat' in user_data: del user_data['acrobat']
 
-    # web_data가 None일 경우를 대비해 빈 딕셔너리로 초기화
     web_data = get_latest_versions() or {}
-    
     changed_keys = []
-    # [수정] 요청하신 출력 순서 정의
+
+    # 출력 순서 정의
     display_order = [
         ('windows_11_24h2', '윈도우 보안 업데이트'),
         ('edge', 'Edge'),
@@ -128,15 +121,12 @@ def main():
         ('chrome', 'Chrome')
     ]
 
-    # 데이터 업데이트 체크
     for key, display_name in display_order:
         sw_info = web_data.get(key)
-        if not sw_info or not isinstance(sw_info, dict):
-            continue
+        if not sw_info or not isinstance(sw_info, dict): continue
             
         latest_v = sw_info.get('version', '')
-        if any(x in latest_v for x in ["오류", "실패", "-", "None"]):
-            continue
+        if any(x in latest_v for x in ["오류", "실패", "매칭 실패", "-", "None"]): continue
 
         current_v = user_data.get(key, {}).get('version', '0')
         
@@ -146,22 +136,15 @@ def main():
             user_data[key] = {"version": latest_v, "date": save_date}
 
     if changed_keys:
-        # [수정] 제목 변경: S/W 업데이트 모니터링
         report = "🔔 [S/W 업데이트 모니터링]\n\n"
         report += f"🚀 업데이트 감지: {', '.join(changed_keys)}\n\n"
         report += "━━━━━ 현재 전체 현황 ━━━━━\n"
         
-        # [수정] 요청하신 순서대로 리포트 생성
         for key, display_name in display_order:
             info = user_data.get(key, {"version": "데이터 없음", "date": "-"})
             mark = "✅" if display_name in changed_keys else "ℹ️"
-            
-            # 크롬만 날짜 라벨을 '조회 날짜'로 표시 (선택 사항)
             date_label = "조회 날짜" if key == 'chrome' else "날짜"
-            
-            report += f"{mark} {display_name}\n"
-            report += f"- 버전: {info.get('version')}\n"
-            report += f"- {date_label}: {info.get('date')}\n\n"
+            report += f"{mark} {display_name}\n- 버전: {info.get('version')}\n- {date_label}: {info.get('date')}\n\n"
         
         send_telegram_msg(report)
         with open(user_data_file, 'w', encoding='utf-8') as f:
