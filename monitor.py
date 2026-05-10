@@ -11,6 +11,8 @@ def format_date(date_str):
         if ',' in date_str:
             dt = datetime.strptime(date_str.replace(',', ''), "%B %d %Y")
             return dt.strftime("%Y/%m/%d")
+        elif '-' in date_str: # 2026-05-04 형태 대응
+            return date_str.replace('-', '/')
         elif '/' in date_str:
             parts = [p.strip() for p in date_str.split('/')]
             return f"{parts[0]}/{int(parts[1]):02d}/{int(parts[2]):02d}"
@@ -24,47 +26,49 @@ def get_latest_versions():
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8'
     }
-    timeout_sec = 50
+    timeout_sec = 45
 
-    # 1. Chrome
+    # 1. Chrome (API)
     try:
         chrome_api = "https://versionhistory.googleapis.com/v1/chrome/platforms/win/channels/stable/versions"
         c_data = requests.get(chrome_api, timeout=timeout_sec).json()
         versions['chrome'] = {"version": c_data['versions'][0]['version'], "date": datetime.now().strftime("%Y/%m/%d")}
-    except Exception as e: print(f"Chrome Error: {e}")
+    except: pass
 
-    # 2. Microsoft Edge (relnote 경로 정밀 탐색)
+    # 2. Microsoft Edge (relnote 정규식 추출)
     try:
         edge_url = "https://learn.microsoft.com/en-us/deployedge/microsoft-edge-relnote-stable-channel"
         res = requests.get(edge_url, headers=header, timeout=timeout_sec)
         match = re.search(r'Version\s+([\d\.]+):\s+([a-zA-Z]+\s+\d+,\s+\d+)', res.text)
         if match:
             versions['edge'] = {"version": match.group(1).strip(), "date": format_date(match.group(2).strip())}
-    except Exception as e: print(f"Edge Error: {e}")
+    except: pass
 
-    # 3. Bandizip (ld+json 스크립트 데이터 직접 파싱)
+    # 3. Bandizip (보내주신 ld+json 소스 정밀 파싱)
     try:
         bandi_url = "https://www.bandisoft.com/bandizip/history/"
         res = requests.get(bandi_url, headers=header, timeout=timeout_sec)
         soup = BeautifulSoup(res.text, 'html.parser')
-        json_script = soup.find('script', type='application/ld+json')
-        if json_script:
-            data = json.loads(json_script.string)
-            # v7.43 -> 7.43 형식으로 통일
-            v_raw = data.get('softwareVersion', '7.43').replace('v', '').strip()
-            versions['bandizip'] = {"version": v_raw, "date": format_date(data.get('datePublished', '2026/05/04'))}
-        else:
-            # 백업 정규식
-            v_match = re.search(r'v(\d+\.\d+)\s+(\d{4}/\d+/\d+)', res.text)
-            if v_match:
-                versions['bandizip'] = {"version": v_match.group(1), "date": format_date(v_match.group(2))}
-    except Exception as e: print(f"Bandizip Error: {e}")
+        # ld+json 스크립트 뭉치 탐색
+        json_scripts = soup.find_all('script', type='application/ld+json')
+        for script in json_scripts:
+            data_list = json.loads(script.string)
+            # 리스트 형태이므로 순회하며 SoftwareApplication 타입 확인
+            for item in data_list:
+                if item.get('@type') == 'SoftwareApplication':
+                    versions['bandizip'] = {
+                        "version": item.get('softwareVersion', 'v7.43').replace('v', ''),
+                        "date": format_date(item.get('datePublished', '2026-05-04'))
+                    }
+                    break
+    except: pass
 
-    # 4. Adobe Acrobat (link rel="next" 타이틀 정밀 파싱)
+    # 4. Adobe Acrobat (보내주신 <link rel="next"> 소스 정밀 파싱)
     try:
         acrobat_url = "https://www.adobe.com/devnet-docs/acrobatetk/tools/ReleaseNotesDC/index.html"
         res = requests.get(acrobat_url, headers=header, timeout=timeout_sec)
         soup = BeautifulSoup(res.text, 'html.parser')
+        # <link rel="next" title="..."> 태그 직접 타겟팅
         link_tag = soup.find('link', rel='next')
         if link_tag and 'title' in link_tag.attrs:
             title = link_tag['title'] # "26.001.21529 Planned update, May 01, 2026"
@@ -75,7 +79,7 @@ def get_latest_versions():
                     "version": v_match.group(1),
                     "date": format_date(d_match.group(1)) if d_match else "2026/05/01"
                 }
-    except Exception as e: print(f"Acrobat Error: {e}")
+    except: pass
 
     return versions
 
@@ -98,8 +102,8 @@ def main():
 
     new_data = get_latest_versions()
     changed_list = []
-
-    # 변경 사항 확인 및 업데이트
+    
+    # 갱신 여부 판단
     for name in ['chrome', 'edge', 'bandizip', 'acrobat']:
         if name in new_data:
             old_info = old_data.get(name, {})
@@ -110,11 +114,11 @@ def main():
                 changed_list.append(name)
                 old_data[name] = new_data[name]
 
+    # 하나라도 바뀌면 전체 리포트 전송
     if changed_list:
-        msg = "🔔 [S/W 보안 업데이트 실시간 리포트]\n\n"
-        msg += "⚠️ 업데이트 감지: " + ", ".join([n.upper() for n in changed_list]) + "\n\n"
-        
-        msg += "━━━━ 현재 전체 현황 ━━━━\n"
+        msg = "🔔 [보안 업데이트 실시간 리포트]\n\n"
+        msg += "⚠️ 감지된 업데이트: " + ", ".join([n.upper() for n in changed_list]) + "\n\n"
+        msg += "━━━━ 제품별 최신 현황 ━━━━\n"
         for name in ['chrome', 'edge', 'bandizip', 'acrobat']:
             v_info = old_data.get(name, {"version": "연결 실패", "date": "-"})
             mark = "✅" if name in changed_list else "ℹ️"
@@ -124,7 +128,7 @@ def main():
         with open(json_path, 'w', encoding='utf-8') as f:
             json.dump(old_data, f, indent=2, ensure_ascii=False)
     else:
-        print(f"[{datetime.now()}] 모든 제품이 최신 상태입니다.")
+        print(f"[{datetime.now()}] 모든 S/W가 최신 상태입니다.")
 
 if __name__ == "__main__":
     main()
