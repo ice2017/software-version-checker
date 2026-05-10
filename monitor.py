@@ -1,20 +1,48 @@
 import os
 import re
 import json
-import subprocess
 import requests
+import smtplib
+import sys
+from email.mime.text import MIMEText
+from email.header import Header
 from datetime import datetime
 
+# [보안 설정] 환경 변수에서 민감 정보 로드
+EMAIL_ADDR = os.environ.get('EMAIL_ADDR')
+EMAIL_PASS = os.environ.get('EMAIL_PASS')
+RECEIVER_ADDR = os.environ.get('RECEIVER_ADDR')
+TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
+TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
+
 def send_telegram_msg(message):
-    token = os.environ.get('TELEGRAM_TOKEN')
-    chat_id = os.environ.get('TELEGRAM_CHAT_ID')
-    if token and chat_id:
-        url = f"https://api.telegram.org/bot{token}/sendMessage"
-        payload = {'chat_id': chat_id, 'text': message}
-        try:
-            requests.post(url, json=payload, timeout=10)
-        except:
-            pass
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {'chat_id': TELEGRAM_CHAT_ID, 'text': message}
+    try:
+        requests.post(url, json=payload, timeout=10)
+    except Exception as e:
+        print(f"텔레그램 전송 실패: {e}")
+
+def send_email_msg(subject, body):
+    if not all([EMAIL_ADDR, EMAIL_PASS, RECEIVER_ADDR]):
+        print("⚠️ 이메일 환경변수 미설정으로 발송을 건너뜁니다.")
+        return
+    
+    msg = MIMEText(body, 'plain', 'utf-8')
+    msg['Subject'] = Header(subject, 'utf-8')
+    msg['From'] = EMAIL_ADDR
+    msg['To'] = RECEIVER_ADDR
+    
+    try:
+        # Gmail SMTP 서버 (SSL 방식)
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(EMAIL_ADDR, EMAIL_PASS)
+            server.sendmail(EMAIL_ADDR, [RECEIVER_ADDR], msg.as_string())
+            print("✉️ 이메일 리포트 발송 완료")
+    except Exception as e:
+        print(f"❌ 이메일 발송 실패: {e}")
 
 def get_latest_versions():
     versions = {}
@@ -22,19 +50,15 @@ def get_latest_versions():
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
     
-    # [1] Windows 11 24H2 보안 업데이트 (B 타입 정기 패치 전용)
+    # [1] Windows 11 24H2 보안 업데이트 (B타입 정기 패치 전용)
     try:
         url = "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information"
         res = requests.get(url, headers=headers, timeout=15)
         if res.status_code == 200:
-            # 24H2 테이블 섹션 추출
             start_idx = res.text.find('id="release-information"')
             search_area = res.text[start_idx:] if start_idx != -1 else res.text
-            
-            # 행(tr) 단위로 분리하여 B 타입 탐색
             rows = re.findall(r'<tr>(.*?)</tr>', search_area, re.DOTALL)
             for row in rows:
-                # 태그 제거 및 텍스트 정규화
                 clean_row = re.sub(r'<[^>]*>', ' ', row)
                 clean_row = re.sub(r'\s+', ' ', clean_row).strip()
                 
@@ -44,7 +68,6 @@ def get_latest_versions():
                     u_date = re.search(r'(\d{4}-\d{2}-\d{2})', clean_row)
                     u_build = re.search(r'(26100\.\d+)', clean_row)
                     u_kb = re.search(r'(KB\d{7})', clean_row)
-                    
                     if u_build and u_kb:
                         versions['windows_11_24h2'] = {
                             'version': f"Build {u_build.group(1)} ({u_kb.group(1)})",
@@ -53,8 +76,8 @@ def get_latest_versions():
                         break
         if 'windows_11_24h2' not in versions:
             versions['windows_11_24h2'] = {'version': 'B타입 미탐지', 'date': '-'}
-    except Exception as e:
-        versions['windows_11_24h2'] = {'version': f'파싱 오류', 'date': '-'}
+    except:
+        versions['windows_11_24h2'] = {'version': '파싱 오류', 'date': '-'}
 
     # [2] Microsoft Edge
     try:
@@ -64,10 +87,8 @@ def get_latest_versions():
         d_m = re.search(r'([A-Z][a-z]+ \d{1,2}, \d{4})', res.text)
         d_str = "-"
         if d_m:
-            try:
-                d_str = datetime.strptime(d_m.group(1).replace(',',''), "%B %d %Y").strftime("%Y/%m/%d")
-            except:
-                d_str = d_m.group(1)
+            try: d_str = datetime.strptime(d_m.group(1).replace(',',''), "%B %d %Y").strftime("%Y/%m/%d")
+            except: d_str = d_m.group(1)
         versions['edge'] = {'version': v_m.group(1) if v_m else "실패", 'date': d_str}
     except:
         versions['edge'] = {'version': '오류', 'date': '-'}
@@ -80,10 +101,8 @@ def get_latest_versions():
         d_match = re.search(r'([A-Z][a-z]+\s+\d{1,2},\s+\d{4})', res.text)
         d_str = "-"
         if d_match:
-            try:
-                d_str = datetime.strptime(d_match.group(1).replace(',', ''), "%B %d %Y").strftime("%Y/%m/%d")
-            except:
-                d_str = d_match.group(1)
+            try: d_str = datetime.strptime(d_match.group(1).replace(',', ''), "%B %d %Y").strftime("%Y/%m/%d")
+            except: d_str = d_match.group(1)
         versions['acrobat_reader'] = {'version': v_match.group(1) if v_match else "실패", 'date': d_str}
     except:
         versions['acrobat_reader'] = {'version': '오류', 'date': '-'}
@@ -96,10 +115,8 @@ def get_latest_versions():
         d = re.search(r'class="cell2">([A-Za-z]{3}\s\d{1,2},\s\d{4})<', res.text)
         d_str = "-"
         if d:
-            try:
-                d_str = datetime.strptime(d.group(1).strip(), '%b %d, %Y').strftime('%Y/%m/%d')
-            except:
-                d_str = d.group(1)
+            try: d_str = datetime.strptime(d.group(1).strip(), '%b %d, %Y').strftime('%Y/%m/%d')
+            except: d_str = d.group(1)
         versions['bandizip'] = {'version': v.group(1) if v else "실패", 'date': d_str}
     except:
         versions['bandizip'] = {'version': '오류', 'date': '-'}
@@ -116,25 +133,22 @@ def get_latest_versions():
     return versions
 
 def main():
+    force_report = "--report" in sys.argv
     user_data_file = "versions.json"
     today = datetime.now().strftime("%Y/%m/%d")
     
     if os.path.exists(user_data_file):
         with open(user_data_file, 'r', encoding='utf-8') as f:
-            try:
-                user_data = json.load(f)
-            except:
-                user_data = {}
+            try: user_data = json.load(f)
+            except: user_data = {}
     else:
         user_data = {}
 
-    if 'acrobat' in user_data: del user_data['acrobat']
-
-    web_data = get_latest_versions() or {}
+    web_data = get_latest_versions()
     changed_keys = []
     
     display_order = [
-        ('windows_11_24h2', 'Windows 11 24H2 보안 업데이트(B타입:정기 패치 전용)'),
+        ('windows_11_24h2', 'Windows 11 24H2 보안 업데이트'),
         ('edge', 'Edge'),
         ('acrobat_reader', '아크로뱃리더'),
         ('bandizip', '반디집'),
@@ -146,8 +160,7 @@ def main():
         if not sw_info: continue
         
         latest_v = sw_info.get('version', '')
-        if any(x in latest_v for x in ["오류", "실패", "파싱 실패", "None", "미탐지"]): 
-            continue
+        if any(x in str(latest_v) for x in ["오류", "실패", "미탐지"]): continue
 
         current_v = user_data.get(key, {}).get('version', '0')
         if latest_v != current_v:
@@ -155,9 +168,13 @@ def main():
             save_date = today if key == 'chrome' else sw_info.get('date', '-')
             user_data[key] = {"version": latest_v, "date": save_date}
 
-    if changed_keys:
-        report = "🔔 [S/W 업데이트 모니터링]\n\n"
-        report += f"🚀 업데이트 감지: {', '.join(changed_keys)}\n\n"
+    # 알림 발송 조건: 변동이 있거나, 9시 정기 보고 모드인 경우
+    if changed_keys or force_report:
+        title = "📢 [S/W 업데이트 모니터링 정기보고]" if force_report else "🔔 [S/W 업데이트 감지]"
+        report = f"{title}\n\n"
+        if changed_keys:
+            report += f"🚀 업데이트 감지: {', '.join(changed_keys)}\n\n"
+        
         report += "━━━━━ 현재 전체 현황 ━━━━━\n"
         for key, display_name in display_order:
             info = user_data.get(key, {"version": "데이터 없음", "date": "-"})
@@ -165,7 +182,11 @@ def main():
             date_label = "조회 날짜" if key == 'chrome' else "날짜"
             report += f"{mark} {display_name}\n- 버전: {info.get('version')}\n- {date_label}: {info.get('date')}\n\n"
         
+        # 메시지 전송
         send_telegram_msg(report)
+        send_email_msg(f"{today} S/W 보안 업데이트 현황", report)
+        
+        # 파일 저장
         with open(user_data_file, 'w', encoding='utf-8') as f:
             json.dump(user_data, f, ensure_ascii=False, indent=4)
 
