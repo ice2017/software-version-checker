@@ -1,151 +1,129 @@
-import requests
-from bs4 import BeautifulSoup
-import json
 import os
-from datetime import datetime
 import re
-import time
+import json
+import subprocess
+import requests
+from datetime import datetime
 
-def format_date(date_str):
-    try:
-        if ',' in date_str:
-            dt = datetime.strptime(date_str.replace(',', ''), "%B %d %Y")
-            return dt.strftime("%Y/%m/%d")
-        return date_str.replace('-', '/').strip()
-    except:
-        return datetime.now().strftime("%Y/%m/%d")
+# 텔레그램 전송 함수
+def send_telegram_msg(message):
+    token = os.environ.get('TELEGRAM_TOKEN')
+    chat_id = os.environ.get('TELEGRAM_CHAT_ID')
+    if token and chat_id:
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        payload = {'chat_id': chat_id, 'text': message}
+        try:
+            requests.post(url, json=payload, timeout=10)
+        except Exception as e:
+            pass # 전송 실패 시 무시
 
 def get_latest_versions():
     versions = {}
-    errors = []
-    # 브라우저와 거의 동일한 수준의 헤더 구성
-    header = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-        'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Cache-Control': 'no-cache',
-        'Pragma': 'no-cache',
-        'Referer': 'https://www.google.com/'
-    }
     
-    # 1. Chrome (API)
+    # 1. Chrome
     try:
-        res = requests.get("https://versionhistory.googleapis.com/v1/chrome/platforms/win/channels/stable/versions", timeout=20)
-        versions['chrome'] = {"version": str(res.json()['versions'][0]['version']), "date": datetime.now().strftime("%Y/%m/%d")}
-    except Exception as e: errors.append(f"Chrome: {str(e)}")
+        url = "https://versionhistory.googleapis.com/v1/chrome/platforms/win/channels/stable/versions"
+        res = subprocess.run(f'curl -fsSL "{url}"', shell=True, capture_output=True, text=True, timeout=10)
+        if res.stdout:
+            versions['chrome'] = {'version': json.loads(res.stdout)['versions'][0]['version']}
+    except:
+        versions['chrome'] = {'version': 'API 오류'}
 
     # 2. Microsoft Edge
     try:
-        res = requests.get("https://learn.microsoft.com/en-us/deployedge/microsoft-edge-relnote-stable-channel", headers=header, timeout=30)
-        match = re.search(r'Version\s+([\d\.]+):\s+([a-zA-Z]+\s+\d+,\s+\d+)', res.text)
-        if match:
-            versions['edge'] = {"version": match.group(1).strip(), "date": format_date(match.group(2).strip())}
-        else: errors.append("Edge: 패턴 매칭 실패")
-    except Exception as e: errors.append(f"Edge: {str(e)}")
+        url = "https://learn.microsoft.com/en-us/deployedge/microsoft-edge-relnote-stable-channel"
+        res = subprocess.run(f'curl -fsSL "{url}"', shell=True, capture_output=True, text=True, timeout=10)
+        if res.stdout:
+            v_m = re.search(r'Version\s+([\d.]+)', res.stdout)
+            d_m = re.search(r'([A-Z][a-z]+ \d{1,2}, \d{4})', res.stdout)
+            d_str = "-"
+            if d_m:
+                try: d_str = datetime.strptime(d_m.group(1).replace(',',''), "%B %d %Y").strftime("%Y/%m/%d")
+                except: pass
+            versions['edge'] = {'version': v_m.group(1) if v_m else "실패", 'date': d_str}
+    except:
+        versions['edge'] = {'version': '연결 실패', 'date': '-'}
 
-    # 3. Bandizip (BeautifulSoup으로 안전하게 접근)
+    # 3. Bandizip
     try:
-        res = requests.get("https://www.bandisoft.com/bandizip/history/", headers=header, timeout=30)
-        soup = BeautifulSoup(res.text, 'html.parser')
-        scripts = soup.find_all('script', type='application/ld+json')
-        found_b = False
-        for s in scripts:
-            if not s.string: continue
-            try:
-                data = json.loads(s.string)
-                items = data if isinstance(data, list) else [data]
-                for item in items:
-                    if 'softwareVersion' in item:
-                        v = item['softwareVersion'].replace('v', '').strip()
-                        versions['bandizip'] = {"version": f"v{v}", "date": format_date(item.get('datePublished', ''))}
-                        found_b = True; break
-            except: continue
-            if found_b: break
-        if not found_b: errors.append("Bandizip: JSON 데이터 추출 실패")
-    except Exception as e: errors.append(f"Bandizip: {str(e)}")
-
-    # 4. Adobe Acrobat (타임아웃 및 재시도 로직 강화)
-    acrobat_url = "https://www.adobe.com/devnet-docs/acrobatetk/tools/ReleaseNotesDC/index.html"
-    try:
-        with requests.Session() as s:
-            s.headers.update(header)
-            # 타임아웃은 45초로 유지하되, 실패 시 1회 즉시 재시도
-            try:
-                res = s.get(acrobat_url, timeout=45)
-            except:
-                time.sleep(5)
-                res = s.get(acrobat_url, timeout=45)
-            
-            # 파싱 로직
-            match = re.search(r'(\d{2}\.\d{3}\.\d{5})\s+Planned\s+update,\s+([a-zA-Z]+\s+\d+,\s+\d+)', res.text)
+        url = "https://www.bandisoft.com/bandizip/history/"
+        res = subprocess.run(f'curl -fsSL "{url}"', shell=True, capture_output=True, text=True, timeout=10)
+        if res.stdout:
+            pattern = r'class="cell1">v?([\d.]+)<[\s\S]*?class="cell2">([a-zA-Z]+\s+\d{1,2},\s+\d{4})<'
+            match = re.search(pattern, res.stdout)
             if match:
-                versions['acrobat'] = {"version": match.group(1).strip(), "date": format_date(match.group(2).strip())}
-            else:
-                soup = BeautifulSoup(res.text, 'html.parser')
-                link_tag = soup.find('link', rel='next')
-                if link_tag and 'title' in link_tag.attrs:
-                    t = link_tag['title']
-                    v_m = re.search(r'(\d{2}\.\d{3}\.\d{5})', t)
-                    d_m = re.search(r'([a-zA-Z]+\s+\d+,\s+\d+)', t)
-                    if v_m:
-                        versions['acrobat'] = {"version": v_m.group(1), "date": format_date(d_m.group(1)) if d_m else "2026/05/01"}
-                
-            if 'acrobat' not in versions: errors.append("Acrobat: 파싱 실패")
-    except Exception as e: errors.append(f"Acrobat: {str(e)}")
+                v = match.group(1).strip()
+                d_raw = match.group(2).strip()
+                try:
+                    dt = datetime.strptime(d_raw, '%b %d, %Y')
+                    d = dt.strftime('%Y/%m/%d')
+                except: d = d_raw
+                versions['bandizip'] = {'version': v, 'date': d}
+    except:
+        versions['bandizip'] = {'version': '연결 실패', 'date': '-'}
 
-    return versions, errors
+    # 4. Acrobat Reader (사용자 검증 curl 주소 및 37번 라인 패턴 반영)
+    try:
+        url = "https://helpx.adobe.com/acrobat/release-note/release-notes-acrobat-reader.html"
+        res = subprocess.run(f'curl -fsSL "{url}"', shell=True, capture_output=True, text=True, timeout=15)
+        html_source = res.stdout
+        if html_source:
+            # title="26.001.21529" 패턴 추출
+            v_match = re.search(r'title="(\d{2}\.\d{3}\.\d{5})', html_source)
+            d_match = re.search(r'([A-Z][a-z]+\s+\d{1,2},\s+\d{4})', html_source)
+            d_str = "-"
+            if d_match:
+                try:
+                    d_raw = d_match.group(1).replace(',', '')
+                    d_str = datetime.strptime(d_raw, "%B %d %Y").strftime("%Y/%m/%d")
+                except: d_str = d_match.group(1)
+            versions['acrobat_reader'] = {'version': v_match.group(1) if v_match else "파싱 실패", 'date': d_str}
+    except:
+        versions['acrobat_reader'] = {'version': '실행 오류', 'date': '-'}
+
+    return versions
 
 def main():
-    json_path = 'versions.json'
-    try:
-        with open(json_path, 'r', encoding='utf-8') as f:
+    user_data_file = "versions.json"
+    today = datetime.now().strftime("%Y/%m/%d")
+    
+    if os.path.exists(user_data_file):
+        with open(user_data_file, 'r', encoding='utf-8') as f:
             user_data = json.load(f)
-    except:
+    else:
         user_data = {}
 
-    web_data, errors = get_latest_versions()
+    web_data = get_latest_versions()
     changed_keys = []
 
-    # 비교 로직
-    for name in ['chrome', 'edge', 'bandizip', 'acrobat']:
-        if name in web_data:
-            old_v = str(user_data.get(name, {}).get('version', '')).strip()
-            new_v = str(web_data[name]['version']).strip()
-            if old_v != new_v:
-                changed_keys.append(name.upper())
-                user_data[name] = web_data[name]
+    for name in ['chrome', 'edge', 'bandizip', 'acrobat_reader']:
+        if name in web_data and "실패" not in web_data[name].get('version', '') and "오류" not in web_data[name].get('version', ''):
+            latest_v = web_data[name]['version']
+            current_v = user_data.get(name, {}).get('version', '0')
+            
+            if latest_v != current_v:
+                changed_keys.append(name.upper().replace('_', ' '))
+                save_date = today if name == 'chrome' else web_data[name].get('date', '-')
+                user_data[name] = {"version": latest_v, "date": save_date}
 
-    # 알림 발송 (업데이트가 있거나, 에러가 발생한 경우 무조건 발송)
-    if changed_keys or errors:
-        msg = "🔔 [S/W 업데이트 모니터링 리포트]\n\n"
-        if changed_keys:
-            msg += f"🚀 업데이트 감지: {', '.join(changed_keys)}\n\n"
-        if errors:
-            msg += "❌ 수집 오류 내역:\n" + "\n".join([f"• {e}" for e in errors]) + "\n\n"
+    # 업데이트가 감지되었을 때만 텔레그램 전송
+    if changed_keys:
+        report = "🔔 [S/W 업데이트 모니터링 최종 정합성 리포트]\n\n"
+        report += f"🚀 업데이트 감지: {', '.join(changed_keys)}\n\n"
+        report += "━━━━━ 현재 전체 현황 ━━━━━\n"
+        for sw in ['chrome', 'edge', 'bandizip', 'acrobat_reader']:
+            info = user_data.get(sw, {"version": "데이터 없음", "date": "-"})
+            mark = "✅" if sw.upper().replace('_', ' ') in changed_keys else "ℹ️"
+            date_label = "조회 날짜" if sw == 'chrome' else "날짜"
+            report += f"{mark} {sw.upper().replace('_', ' ')}\n"
+            report += f"- 버전: {info['version']}\n"
+            report += f"- {date_label}: {info['date']}\n\n"
         
-        msg += "━━━━━ 현재 상태 ━━━━━\n"
-        for name in ['chrome', 'edge', 'bandizip', 'acrobat']:
-            info = user_data.get(name, {"version": "Error", "date": "-"})
-            mark = "✅" if name.upper() in changed_keys else "ℹ️"
-            if any(name.lower() in err.lower() for err in errors): mark = "⚠️"
-            msg += f"{mark} {name.upper()}\n- 버전: {info['version']}\n- 날짜: {info['date']}\n\n"
+        send_telegram_msg(report)
         
-        # 텔레그램 발송
-        token = os.environ.get('TELEGRAM_TOKEN')
-        chat_id = os.environ.get('TELEGRAM_CHAT_ID')
-        if token and chat_id:
-            try:
-                requests.get(f"https://api.telegram.org/bot{token}/sendMessage", 
-                             params={"chat_id": chat_id, "text": msg}, timeout=15)
-            except Exception as te:
-                print(f"텔레그램 발송 실패: {te}")
-        
-        # 파일 저장
-        if changed_keys:
-            with open(json_path, 'w', encoding='utf-8') as f:
-                json.dump(user_data, f, indent=2, ensure_ascii=False)
-    else:
-        print("모든 제품이 최신 상태이며 에러가 없습니다.")
+        # 새로운 버전 정보 파일 저장
+        with open(user_data_file, 'w', encoding='utf-8') as f:
+            json.dump(user_data, f, ensure_ascii=False, indent=4)
 
 if __name__ == "__main__":
     main()
