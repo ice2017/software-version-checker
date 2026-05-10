@@ -72,24 +72,54 @@ def get_latest_versions():
             versions['acrobat_reader'] = {'version': v_match.group(1) if v_match else "실패", 'date': d_str}
     except: versions['acrobat_reader'] = {'version': '오류', 'date': '-'}
 
-    # 5. Windows 11 24H2 (보안 업데이트 및 날짜 추출 보강)
+# 5. Windows 11 24H2 (보안 업데이트 및 실제 출시일 추출)
     try:
         url = "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information"
+        # Rocky 9의 curl을 사용하여 차단 우회
         res = subprocess.run(f'curl -fsSL "{url}"', shell=True, capture_output=True, text=True, timeout=10)
+        
         if res.stdout:
-            build_match = re.search(r'26100\.\d+', res.stdout)
-            kb_match = re.search(r'KB\d{7}', res.stdout)
-            # 윈도우 페이지 특유의 날짜 패턴 대응 (태그 사이에 있는 날짜 낚아채기)
-            d_match = re.search(r'>([A-Z][a-z]+\s+\d{1,2},\s+\d{4})<', res.stdout)
-            d_str = "-"
-            if d_match:
-                try: d_str = datetime.strptime(d_match.group(1).replace(',',''), "%B %d %Y").strftime("%Y/%m/%d")
-                except: pass
+            # 24H2 섹션 이후만 남김
+            content_24h2 = res.stdout.split("24H2")[-1] 
             
-            ver_str = f"Build {build_match.group(0)}" if build_match else "실패"
-            if kb_match: ver_str += f" ({kb_match.group(0)})"
-            versions['windows_11_24h2'] = {'version': ver_str, 'date': d_str}
-    except: versions['windows_11_24h2'] = {'version': '오류', 'date': '-'}
+            # 빌드 번호(26100.xxxx)를 기준으로 텍스트를 쪼개어 표 내부 데이터에 접근
+            # 첫 번째 빌드 번호가 적힌 주변 텍스트에서 KB와 날짜를 찾음
+            builds = re.findall(r'26100\.\d+', content_24h2)
+            kbs = re.findall(r'KB\d{7}', content_24h2)
+            
+            # 날짜 패턴 (YYYY-MM-DD 또는 영문 날짜)
+            # 지원 종료일 같은 미래 날짜를 피하기 위해 2024~2026년 범위로 한정
+            dates = re.findall(r'202[4-6]-\d{2}-\d{2}|[A-Z][a-z]+ \d{1,2}, \d{4}', content_24h2)
+            
+            # 데이터 정합성 체크: 빌드 번호가 나온 지점 이후의 첫 번째 날짜가 실제 출시일임
+            latest_build = builds[0] if builds else "추출 실패"
+            latest_kb = kbs[0] if kbs else ""
+            
+            # 지원 종료일(상단)이 아닌 실제 업데이트 날짜(표 내부)를 가져오기 위해 
+            # 보통 빌드/KB 번호 근처에 있는 날짜를 선택 (결과 리스트에서 적절한 인덱스 탐색)
+            d_str = "-"
+            if dates:
+                # 리스트를 돌며 오늘 날짜보다 미래가 아닌 첫 번째 날짜 선택
+                for d_raw in dates:
+                    clean_d = d_raw.replace(',', '')
+                    try:
+                        if '-' in clean_d: # YYYY-MM-DD
+                            dt = datetime.strptime(clean_d, "%Y-%m-%d")
+                        else: # May 01, 2026
+                            dt = datetime.strptime(clean_d, "%B %d %Y")
+                        
+                        # 미래 날짜(예: 2028년 지원종료일)가 아니면 선택
+                        if dt <= datetime.now():
+                            d_str = dt.strftime("%Y/%m/%d")
+                            break
+                    except: continue
+
+            versions['windows_11_24h2'] = {
+                'version': f"Build {latest_build} ({latest_kb})" if latest_kb else f"Build {latest_build}",
+                'date': d_str
+            }
+    except Exception as e:
+        versions['windows_11_24h2'] = {'version': '오류', 'date': '-'}
 
     return versions
 
