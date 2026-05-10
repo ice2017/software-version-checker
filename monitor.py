@@ -18,45 +18,50 @@ def send_telegram_msg(message):
 
 def get_latest_versions():
     versions = {}
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
     
-    # [1] Windows 11 24H2 보안 업데이트
+    # [1] Windows 11 24H2 보안 업데이트 (B 타입 정기 패치 전용)
     try:
         url = "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information"
-        response = requests.get(url, timeout=15)
-        # HTML 태그 제거 및 텍스트 정규화
-        content = re.sub(r'<[^>]*>', ' ', response.text)
-        content = re.sub(r'\s+', ' ', content)
-
-        # 24H2 섹션 이후의 데이터만 추출 (범위 제한)
-        start_idx = content.find("24H2")
-        target_text = content[start_idx : start_idx + 2000] if start_idx != -1 else content
-
-        # 데이터 패턴 매칭
-        # - 날짜: YYYY-MM-DD
-        # - 빌드: 26100.xxxx
-        # - KB: KB1234567
-        u_date = re.search(r'(\d{4}-\d{2}-\d{2})', target_text)
-        u_build = re.search(r'(26100\.\d+)', target_text)
-        u_kb = re.search(r'(KB\d{7})', target_text)
-
-        if u_build and u_kb:
-            versions['windows_11_24h2'] = {
-                'version': f"Build {u_build.group(1)} ({u_kb.group(1)})",
-                'date': u_date.group(1).replace('-', '/') if u_date else "-"
-            }
-        else:
-            # 패턴 매칭 실패 시 수동 파싱 시도 (비상용)
-            versions['windows_11_24h2'] = {'version': '데이터 매칭 실패', 'date': '-'}
+        res = requests.get(url, headers=headers, timeout=15)
+        if res.status_code == 200:
+            # 24H2 테이블 섹션 추출
+            start_idx = res.text.find('id="release-information"')
+            search_area = res.text[start_idx:] if start_idx != -1 else res.text
             
+            # 행(tr) 단위로 분리하여 B 타입 탐색
+            rows = re.findall(r'<tr>(.*?)</tr>', search_area, re.DOTALL)
+            for row in rows:
+                # 태그 제거 및 텍스트 정규화
+                clean_row = re.sub(r'<[^>]*>', ' ', row)
+                clean_row = re.sub(r'\s+', ' ', clean_row).strip()
+                
+                # B 타입(정기 패치) 및 24H2 빌드(26100) 조건 확인
+                is_b_type = ' B ' in f" {clean_row} " or 'Security Update' in clean_row
+                if '26100.' in clean_row and is_b_type:
+                    u_date = re.search(r'(\d{4}-\d{2}-\d{2})', clean_row)
+                    u_build = re.search(r'(26100\.\d+)', clean_row)
+                    u_kb = re.search(r'(KB\d{7})', clean_row)
+                    
+                    if u_build and u_kb:
+                        versions['windows_11_24h2'] = {
+                            'version': f"Build {u_build.group(1)} ({u_kb.group(1)})",
+                            'date': u_date.group(1).replace('-', '/') if u_date else "-"
+                        }
+                        break
+        if 'windows_11_24h2' not in versions:
+            versions['windows_11_24h2'] = {'version': 'B타입 미탐지', 'date': '-'}
     except Exception as e:
-        versions['windows_11_24h2'] = {'version': f'파싱 오류: {str(e)}', 'date': '-'}
+        versions['windows_11_24h2'] = {'version': f'파싱 오류', 'date': '-'}
 
-    # [2] Microsoft Edge (순서 2번)
+    # [2] Microsoft Edge
     try:
         url = "https://learn.microsoft.com/en-us/deployedge/microsoft-edge-relnote-stable-channel"
-        res = subprocess.run(f'curl -fsSL "{url}"', shell=True, capture_output=True, text=True, timeout=10)
-        v_m = re.search(r'Version\s+([\d.]+)', res.stdout)
-        d_m = re.search(r'([A-Z][a-z]+ \d{1,2}, \d{4})', res.stdout)
+        res = requests.get(url, headers=headers, timeout=10)
+        v_m = re.search(r'Version\s+([\d.]+)', res.text)
+        d_m = re.search(r'([A-Z][a-z]+ \d{1,2}, \d{4})', res.text)
         d_str = "-"
         if d_m:
             try:
@@ -67,12 +72,12 @@ def get_latest_versions():
     except:
         versions['edge'] = {'version': '오류', 'date': '-'}
 
-    # [3] Acrobat Reader (순서 3번)
+    # [3] Acrobat Reader
     try:
         url = "https://helpx.adobe.com/acrobat/release-note/release-notes-acrobat-reader.html"
-        res = subprocess.run(f'curl -fsSL "{url}"', shell=True, capture_output=True, text=True, timeout=15)
-        v_match = re.search(r'title="(\d{2}\.\d{3}\.\d{5})', res.stdout)
-        d_match = re.search(r'([A-Z][a-z]+\s+\d{1,2},\s+\d{4})', res.stdout)
+        res = requests.get(url, headers=headers, timeout=15)
+        v_match = re.search(r'title="(\d{2}\.\d{3}\.\d{5})', res.text)
+        d_match = re.search(r'([A-Z][a-z]+\s+\d{1,2},\s+\d{4})', res.text)
         d_str = "-"
         if d_match:
             try:
@@ -83,12 +88,12 @@ def get_latest_versions():
     except:
         versions['acrobat_reader'] = {'version': '오류', 'date': '-'}
 
-    # [4] Bandizip (순서 4번)
+    # [4] Bandizip
     try:
         url = "https://www.bandisoft.com/bandizip/history/"
-        res = subprocess.run(f'curl -fsSL "{url}"', shell=True, capture_output=True, text=True, timeout=10)
-        v = re.search(r'class="cell1">v?([\d.]+)<', res.stdout)
-        d = re.search(r'class="cell2">([A-Za-z]{3}\s\d{1,2},\s\d{4})<', res.stdout)
+        res = requests.get(url, headers=headers, timeout=10)
+        v = re.search(r'class="cell1">v?([\d.]+)<', res.text)
+        d = re.search(r'class="cell2">([A-Za-z]{3}\s\d{1,2},\s\d{4})<', res.text)
         d_str = "-"
         if d:
             try:
@@ -99,12 +104,12 @@ def get_latest_versions():
     except:
         versions['bandizip'] = {'version': '오류', 'date': '-'}
 
-    # [5] Chrome (순서 5번)
+    # [5] Chrome
     try:
         url = "https://versionhistory.googleapis.com/v1/chrome/platforms/win/channels/stable/versions"
-        res = subprocess.run(f'curl -fsSL "{url}"', shell=True, capture_output=True, text=True, timeout=10)
-        if res.stdout:
-            versions['chrome'] = {'version': json.loads(res.stdout)['versions'][0]['version']}
+        res = requests.get(url, headers=headers, timeout=10)
+        if res.status_code == 200:
+            versions['chrome'] = {'version': res.json()['versions'][0]['version']}
     except:
         versions['chrome'] = {'version': '오류'}
 
@@ -128,9 +133,8 @@ def main():
     web_data = get_latest_versions() or {}
     changed_keys = []
     
-    # 요청하신 출력 순서와 내부 로직 순서를 통일함
     display_order = [
-        ('windows_11_24h2', 'Windows 11 24H2 보안 업데이트'),
+        ('windows_11_24h2', 'Windows 11 24H2 보안 업데이트(B타입:정기 패치 전용)'),
         ('edge', 'Edge'),
         ('acrobat_reader', '아크로뱃리더'),
         ('bandizip', '반디집'),
@@ -142,14 +146,12 @@ def main():
         if not sw_info: continue
         
         latest_v = sw_info.get('version', '')
-        # 유효하지 않은 데이터는 업데이트 감지에서 제외
-        if any(x in latest_v for x in ["오류", "실패", "파싱 실패", "None"]): 
+        if any(x in latest_v for x in ["오류", "실패", "파싱 실패", "None", "미탐지"]): 
             continue
 
         current_v = user_data.get(key, {}).get('version', '0')
         if latest_v != current_v:
             changed_keys.append(display_name)
-            # 크롬은 조회일, 나머지는 추출된 배포일 저장
             save_date = today if key == 'chrome' else sw_info.get('date', '-')
             user_data[key] = {"version": latest_v, "date": save_date}
 
