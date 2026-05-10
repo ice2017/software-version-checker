@@ -17,30 +17,34 @@ def send_telegram_msg(message):
 def get_latest_versions():
     versions = {}
     
-    # [1] Windows 11 24H2 (터미널 검증 성공 명령어 적용)
+    # [1] Windows 11 24H2 (파이썬 내부 문자열 처리로 우회 - 가장 안전)
     try:
-        # 이스케이프 문제를 방지하기 위해 정규표현식 부분을 f-string 대신 원시 문자열로 처리
-        shell_cmd = (
+        # 정규표현식이 깨지는 grep 대신, 텍스트만 뽑아서 파이썬이 직접 처리합니다.
+        cmd = (
             'curl -fsSL "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information" | '
-            'sed -n "/24H2/,$p" | '
-            'sed "s/<[^>]*>/ /g" | '
-            'tr -d "\\n" | tr -s " " | '
-            'grep -oP "\\d{4}-\\d{2}\\sB\\s\\d{4}-\\d{2}-\\d{2}\\s26100\\.[0-9]+\\sKB[0-9]{7}" | head -n 1'
+            'sed -n "/24H2/,$p" | sed "s/<[^>]*>/ /g" | tr -s " "'
         )
-        # stderr를 stdout으로 합쳐서 에러 확인 가능하게 함
-        res = subprocess.check_output(shell_cmd, shell=True, text=True, stderr=subprocess.STDOUT)
+        res = subprocess.check_output(cmd, shell=True, text=True, stderr=subprocess.DEVNULL)
         
-        line = res.strip()
-        if line:
-            # 결과: 2026-04 B 2026-04-14 26100.8246 KB5083769
-            parts = line.split()
-            if len(parts) >= 5:
-                versions['windows_11_24h2'] = {
-                    'version': f"Build {parts[3]} ({parts[4]})",
-                    'date': parts[2].replace('-', '/')
-                }
-    except Exception as e:
-        versions['windows_11_24h2'] = {'version': '파싱 실패', 'date': '-'}
+        if res:
+            parts = res.split()
+            u_date, u_build, u_kb = "-", "-", "-"
+            # 터미널 결과와 동일하게 'B' 타입을 기점으로 데이터 세트 탐색
+            for i, word in enumerate(parts):
+                if word == "B" and i > 0 and len(parts[i-1]) == 7: # 2026-04 B 형태
+                    # B 지점 이후 10개 단어 내에서 날짜, 빌드, KB 획득
+                    window = parts[i+1 : i+11]
+                    for item in window:
+                        if u_date == "-" and re.match(r'^\d{4}-\d{2}-\d{2}$', item): u_date = item
+                        if u_build == "-" and item.startswith("26100."): u_build = item
+                        if u_kb == "-" and item.startswith("KB") and len(item) == 9: u_kb = item
+                    if u_build != "-" and u_kb != "-": break
+            
+            versions['windows_11_24h2'] = {
+                'version': f"Build {u_build} ({u_kb})",
+                'date': u_date.replace('-', '/')
+            }
+    except: versions['windows_11_24h2'] = {'version': '파싱 실패', 'date': '-'}
 
     # [2] Microsoft Edge
     try:
@@ -106,9 +110,9 @@ def main():
     web_data = get_latest_versions() or {}
     changed_keys = []
     
-    # 출력 순서 (요청 사항 반영)
+    # [순서 보장] 요청하신 출력 순서
     display_order = [
-        ('windows_11_24h2', 'Windows 11 24H2 보안 업데이트'),
+        ('windows_11_24h2', '윈도우 보안 업데이트'),
         ('edge', 'Edge'),
         ('acrobat_reader', '아크로뱃리더'),
         ('bandizip', '반디집'),
