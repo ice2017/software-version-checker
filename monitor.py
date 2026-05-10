@@ -67,33 +67,31 @@ def get_latest_versions():
             versions['acrobat_reader'] = {'version': v_match.group(1) if v_match else "실패", 'date': d_str}
     except: versions['acrobat_reader'] = {'version': '오류', 'date': '-'}
 
-    # 5. Windows 11 24H2 (B 타입 보안 업데이트 정밀 파싱)
+    # 5. Windows 11 24H2 (태그 제거 후 행 단위 정밀 파싱)
     try:
         url = "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information"
         res = subprocess.run(f'curl -fsSL "{url}"', shell=True, capture_output=True, text=True, timeout=15)
         if res.stdout:
-            # 24H2 섹션 이후 데이터 추출
+            # 24H2 이후 내용만 추출
             content_24h2 = res.stdout.split("24H2")[-1]
+            # HTML 태그 제거 및 깨끗한 텍스트 행 리스트 생성
+            clean_text = re.sub(r'<[^>]*>', '\n', content_24h2)
+            lines = [l.strip() for l in clean_text.split('\n') if l.strip()]
             
-            # 정규표현식 설명:
-            # (\d{4}-\d{2} B) : "2026-04 B" 같은 타입을 찾음
-            # .*?(\d{4}-\d{2}-\d{2}) : 그 뒤에 오는 첫 번째 날짜 추출
-            # .*?(26100\.\d+) : 그 뒤에 오는 빌드 번호 추출
-            # .*?(KB\d{7}) : 그 뒤에 오는 KB 번호 추출
-            pattern = r'(\d{4}-\d{2}\sB).*?(\d{4}-\d{2}-\d{2}).*?(26100\.\d+).*?(KB\d{7})'
-            b_updates = re.findall(pattern, content_24h2, re.DOTALL)
-            
-            if b_updates:
-                # findall 결과 중 가장 첫 번째 것이 가장 최신 B 타입 업데이트
-                latest_b = b_updates[0]
-                u_type, u_date, u_build, u_kb = latest_b
-                
-                versions['windows_11_24h2'] = {
-                    'version': f"Build {u_build} ({u_kb})",
-                    'date': u_date.replace('-', '/')
-                }
-            else:
-                versions['windows_11_24h2'] = {'version': 'B타입 추출 실패', 'date': '-'}
+            # "YYYY-MM B" 패턴을 찾아 그 아래 데이터 세트 추출
+            for i, line in enumerate(lines):
+                if re.match(r'^\d{4}-\d{2}\sB$', line):
+                    u_date = lines[i+1]   # 출시일 (2026-04-14)
+                    u_build = lines[i+2]  # 빌드 (26100.8246)
+                    u_kb = lines[i+3]     # KB번호 (KB5083769)
+                    
+                    # 26100 빌드인지 확인 (LTSC/GA 확인용)
+                    if "26100" in u_build:
+                        versions['windows_11_24h2'] = {
+                            'version': f"Build {u_build} ({u_kb})",
+                            'date': u_date.replace('-', '/')
+                        }
+                        break
     except:
         versions['windows_11_24h2'] = {'version': '오류', 'date': '-'}
 
