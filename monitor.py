@@ -56,12 +56,14 @@ def get_latest_versions():
                 versions['bandizip'] = {'version': v, 'date': d}
     except: versions['bandizip'] = {'version': '오류', 'date': '-'}
 
-    # 4. Acrobat Reader (보내주신 소스 37번 라인 기반)
+    # 4. Acrobat Reader (보내주신 helpx 소스 37번 라인 기반)
     try:
         url = "https://helpx.adobe.com/acrobat/release-note/release-notes-acrobat-reader.html"
         res = subprocess.run(f'curl -fsSL "{url}"', shell=True, capture_output=True, text=True, timeout=15)
         if res.stdout:
+            # v_match: title="26.001.21529" 추출
             v_match = re.search(r'title="(\d{2}\.\d{3}\.\d{5})', res.stdout)
+            # d_match: "May 01, 2026" 추출
             d_match = re.search(r'([A-Z][a-z]+\s+\d{1,2},\s+\d{4})', res.stdout)
             d_str = "-"
             if d_match:
@@ -70,16 +72,15 @@ def get_latest_versions():
             versions['acrobat_reader'] = {'version': v_match.group(1) if v_match else "실패", 'date': d_str}
     except: versions['acrobat_reader'] = {'version': '오류', 'date': '-'}
 
-    # 5. Windows 11 24H2 (보안 업데이트 KB 및 빌드)
+    # 5. Windows 11 24H2 (보안 업데이트 및 날짜 추출 보강)
     try:
         url = "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information"
         res = subprocess.run(f'curl -fsSL "{url}"', shell=True, capture_output=True, text=True, timeout=10)
         if res.stdout:
-            # 24H2 섹션에서 가장 최신 빌드(26100으로 시작)와 KB 번호 추출
             build_match = re.search(r'26100\.\d+', res.stdout)
             kb_match = re.search(r'KB\d{7}', res.stdout)
-            # 날짜 추출 (문서 내 최신 업데이트 날짜)
-            d_match = re.search(r'([A-Z][a-z]+ \d{1,2}, \d{4})', res.stdout)
+            # 윈도우 페이지 특유의 날짜 패턴 대응 (태그 사이에 있는 날짜 낚아채기)
+            d_match = re.search(r'>([A-Z][a-z]+\s+\d{1,2},\s+\d{4})<', res.stdout)
             d_str = "-"
             if d_match:
                 try: d_str = datetime.strptime(d_match.group(1).replace(',',''), "%B %d %Y").strftime("%Y/%m/%d")
@@ -87,7 +88,6 @@ def get_latest_versions():
             
             ver_str = f"Build {build_match.group(0)}" if build_match else "실패"
             if kb_match: ver_str += f" ({kb_match.group(0)})"
-            
             versions['windows_11_24h2'] = {'version': ver_str, 'date': d_str}
     except: versions['windows_11_24h2'] = {'version': '오류', 'date': '-'}
 
@@ -102,10 +102,14 @@ def main():
             user_data = json.load(f)
     else: user_data = {}
 
+    # acrobat_reader로 키를 통일하기 위해 기존 acrobat 키 제거 (정리 로직)
+    if 'acrobat' in user_data:
+        del user_data['acrobat']
+
     web_data = get_latest_versions()
     changed_keys = []
     
-    # 체크할 대상 리스트
+    # 순서 보장을 위한 대상 리스트
     targets = ['chrome', 'edge', 'bandizip', 'acrobat_reader', 'windows_11_24h2']
 
     for name in targets:
@@ -118,7 +122,6 @@ def main():
                 save_date = today if name == 'chrome' else web_data[name].get('date', '-')
                 user_data[name] = {"version": latest_v, "date": save_date}
 
-    # 업데이트가 감지되었을 때만 텔레그램 전송 (화면 출력 없음)
     if changed_keys:
         report = "🔔 [S/W 업데이트 모니터링 최종 정합성 리포트]\n\n"
         report += f"🚀 업데이트 감지: {', '.join(changed_keys)}\n\n"
@@ -133,7 +136,7 @@ def main():
         
         send_telegram_msg(report)
         
-        # 파일 업데이트
+        # 파일 저장
         with open(user_data_file, 'w', encoding='utf-8') as f:
             json.dump(user_data, f, ensure_ascii=False, indent=4)
 
