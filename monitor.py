@@ -17,31 +17,30 @@ def send_telegram_msg(message):
 def get_latest_versions():
     versions = {}
     
-    # [1] Windows 11 24H2 (터미널 성공 명령어의 결과값을 직접 획득)
+    # [1] Windows 11 24H2 (터미널 검증 성공 명령어 적용)
     try:
-        # 사용자님이 터미널에서 성공하신 명령어를 문자열 하나로 묶음
-        # 파이썬에서 파이프(|)와 특수기호를 가장 안전하게 실행하는 조합입니다.
-        cmd = (
+        # 이스케이프 문제를 방지하기 위해 정규표현식 부분을 f-string 대신 원시 문자열로 처리
+        shell_cmd = (
             'curl -fsSL "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information" | '
             'sed -n "/24H2/,$p" | '
             'sed "s/<[^>]*>/ /g" | '
             'tr -d "\\n" | tr -s " " | '
             'grep -oP "\\d{4}-\\d{2}\\sB\\s\\d{4}-\\d{2}-\\d{2}\\s26100\\.[0-9]+\\sKB[0-9]{7}" | head -n 1'
         )
-        # shell=True를 통해 터미널과 동일한 환경 제공
-        res = subprocess.check_output(cmd, shell=True, text=True, stderr=subprocess.DEVNULL)
+        # stderr를 stdout으로 합쳐서 에러 확인 가능하게 함
+        res = subprocess.check_output(shell_cmd, shell=True, text=True, stderr=subprocess.STDOUT)
         
-        if res.strip():
+        line = res.strip()
+        if line:
             # 결과: 2026-04 B 2026-04-14 26100.8246 KB5083769
-            parts = res.strip().split()
-            versions['windows_11_24h2'] = {
-                'version': f"Build {parts[3]} ({parts[4]})",
-                'date': parts[2].replace('-', '/')
-            }
-        else:
-            versions['windows_11_24h2'] = {'version': '추출 실패', 'date': '-'}
-    except:
-        versions['windows_11_24h2'] = {'version': '오류', 'date': '-'}
+            parts = line.split()
+            if len(parts) >= 5:
+                versions['windows_11_24h2'] = {
+                    'version': f"Build {parts[3]} ({parts[4]})",
+                    'date': parts[2].replace('-', '/')
+                }
+    except Exception as e:
+        versions['windows_11_24h2'] = {'version': '파싱 실패', 'date': '-'}
 
     # [2] Microsoft Edge
     try:
@@ -86,7 +85,8 @@ def get_latest_versions():
     try:
         url = "https://versionhistory.googleapis.com/v1/chrome/platforms/win/channels/stable/versions"
         res = subprocess.run(f'curl -fsSL "{url}"', shell=True, capture_output=True, text=True, timeout=10)
-        versions['chrome'] = {'version': json.loads(res.stdout)['versions'][0]['version']}
+        if res.stdout:
+            versions['chrome'] = {'version': json.loads(res.stdout)['versions'][0]['version']}
     except: versions['chrome'] = {'version': '오류'}
 
     return versions
@@ -103,10 +103,10 @@ def main():
 
     if 'acrobat' in user_data: del user_data['acrobat']
 
-    web_data = get_latest_versions()
+    web_data = get_latest_versions() or {}
     changed_keys = []
     
-    # 요청하신 출력 순서
+    # 출력 순서 (요청 사항 반영)
     display_order = [
         ('windows_11_24h2', 'Windows 11 24H2 보안 업데이트'),
         ('edge', 'Edge'),
@@ -120,7 +120,7 @@ def main():
         if not sw_info: continue
         
         latest_v = sw_info.get('version', '')
-        if any(x in latest_v for x in ["오류", "실패", "추출 실패"]): continue
+        if any(x in latest_v for x in ["오류", "실패", "파싱 실패"]): continue
 
         current_v = user_data.get(key, {}).get('version', '0')
         if latest_v != current_v:
