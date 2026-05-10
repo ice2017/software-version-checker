@@ -5,14 +5,17 @@ import subprocess
 import requests
 from datetime import datetime
 
+# 텔레그램 전송 함수
 def send_telegram_msg(message):
     token = os.environ.get('TELEGRAM_TOKEN')
     chat_id = os.environ.get('TELEGRAM_CHAT_ID')
     if token and chat_id:
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         payload = {'chat_id': chat_id, 'text': message}
-        try: requests.post(url, json=payload, timeout=10)
-        except: pass
+        try:
+            requests.post(url, json=payload, timeout=10)
+        except:
+            pass
 
 def get_latest_versions():
     versions = {}
@@ -53,7 +56,7 @@ def get_latest_versions():
                 versions['bandizip'] = {'version': v, 'date': d}
     except: versions['bandizip'] = {'version': '오류', 'date': '-'}
 
-    # 4. Acrobat Reader (사용자 curl 소스 기반 고정)
+    # 4. Acrobat Reader (보내주신 helpx 소스 기반 고정)
     try:
         url = "https://helpx.adobe.com/acrobat/release-note/release-notes-acrobat-reader.html"
         res = subprocess.run(f'curl -fsSL "{url}"', shell=True, capture_output=True, text=True, timeout=15)
@@ -67,25 +70,24 @@ def get_latest_versions():
             versions['acrobat_reader'] = {'version': v_match.group(1) if v_match else "실패", 'date': d_str}
     except: versions['acrobat_reader'] = {'version': '오류', 'date': '-'}
 
-    # 5. Windows 11 24H2 (태그 제거 후 행 단위 정밀 파싱)
+    # 5. Windows 11 24H2 (B타입 최신 업데이트 정밀 파싱)
     try:
         url = "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information"
         res = subprocess.run(f'curl -fsSL "{url}"', shell=True, capture_output=True, text=True, timeout=15)
         if res.stdout:
-            # 24H2 이후 내용만 추출
             content_24h2 = res.stdout.split("24H2")[-1]
-            # HTML 태그 제거 및 깨끗한 텍스트 행 리스트 생성
+            # 모든 태그를 줄바꿈으로 치환하여 순수 텍스트 리스트 생성
             clean_text = re.sub(r'<[^>]*>', '\n', content_24h2)
             lines = [l.strip() for l in clean_text.split('\n') if l.strip()]
             
-            # "YYYY-MM B" 패턴을 찾아 그 아래 데이터 세트 추출
             for i, line in enumerate(lines):
+                # '2026-04 B' 와 같은 패턴을 찾음
                 if re.match(r'^\d{4}-\d{2}\sB$', line):
-                    u_date = lines[i+1]   # 출시일 (2026-04-14)
-                    u_build = lines[i+2]  # 빌드 (26100.8246)
-                    u_kb = lines[i+3]     # KB번호 (KB5083769)
+                    u_date = lines[i+1]   # 출시일 (예: 2026-04-14)
+                    u_build = lines[i+2]  # 빌드 (예: 26100.8246)
+                    u_kb = lines[i+3]     # KB번호 (예: KB5083769)
                     
-                    # 26100 빌드인지 확인 (LTSC/GA 확인용)
+                    # 26100 계열 빌드인지 최종 확인
                     if "26100" in u_build:
                         versions['windows_11_24h2'] = {
                             'version': f"Build {u_build} ({u_kb})",
@@ -106,7 +108,7 @@ def main():
             user_data = json.load(f)
     else: user_data = {}
 
-    # 이전 키값 정리
+    # 구형 키 정리
     if 'acrobat' in user_data: del user_data['acrobat']
 
     web_data = get_latest_versions()
@@ -114,7 +116,7 @@ def main():
     targets = ['chrome', 'edge', 'bandizip', 'acrobat_reader', 'windows_11_24h2']
 
     for name in targets:
-        if name in web_data and "오류" not in web_data[name]['version'] and "실패" not in web_data[name]['version']:
+        if name in web_data and "오류" not in web_data[name].get('version', '') and "실패" not in web_data[name].get('version', ''):
             latest_v = web_data[name]['version']
             current_v = user_data.get(name, {}).get('version', '0')
             
