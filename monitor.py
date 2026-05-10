@@ -67,49 +67,38 @@ def get_latest_versions():
             versions['acrobat_reader'] = {'version': v_match.group(1) if v_match else "실패", 'date': d_str}
     except: versions['acrobat_reader'] = {'version': '오류', 'date': '-'}
 
-    # 5. Windows 11 24H2 (유연한 행 탐색 알고리즘)
+    # 5. Windows 11 24H2 (B타입 최신 업데이트 - 탐색 범위 대폭 확장)
     try:
         url = "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information"
         res = subprocess.run(f'curl -fsSL "{url}"', shell=True, capture_output=True, text=True, timeout=15)
         if res.stdout:
             content_24h2 = res.stdout.split("24H2")[-1]
-            # 태그 제거 및 텍스트 정제
+            # 태그를 제거하고 모든 줄바꿈과 공백을 정리하여 리스트화
             clean_text = re.sub(r'<[^>]*>', '\n', content_24h2)
             lines = [l.strip() for l in clean_text.split('\n') if l.strip()]
             
-            target_idx = -1
-            # "B" 타입이 포함된 가장 최신 행 찾기 (정규식 완화)
-            for i, line in enumerate(lines):
-                if re.search(r'\d{4}-\d{2}\sB', line):
-                    target_idx = i
-                    break
+            u_type, u_date, u_build, u_kb = "-", "-", "-", "-"
             
-            if target_idx != -1:
-                # 찾은 위치 이후로 가장 먼저 나오는 날짜, 빌드, KB를 각각 찾음
-                u_date, u_build, u_kb = "-", "-", "-"
-                for j in range(target_idx + 1, min(target_idx + 10, len(lines))):
-                    item = lines[j]
-                    if not u_date and re.match(r'^\d{4}-\d{2}-\d{2}$', item): u_date = item
-                    if not u_build and re.match(r'^26100\.\d+$', item): u_build = item
-                    if not u_kb and re.match(r'^KB\d{7}$', item): u_kb = item
+            for i, line in enumerate(lines):
+                # '2026-04 B' 또는 단순히 ' B'로 끝나는 업데이트 타입 행 찾기
+                if re.search(r'\d{4}-\d{2}\s+B$', line) or line.endswith(" B"):
+                    # 찾은 지점부터 아래로 15줄까지 훑으며 데이터 매칭
+                    search_range = lines[i:i+15]
+                    temp_date = next((l for l in search_range if re.match(r'^\d{4}-\d{2}-\d{2}$', l)), "-")
+                    temp_build = next((l for l in search_range if re.match(r'^26100\.\d+$', l)), "-")
+                    temp_kb = next((l for l in search_range if re.match(r'^KB\d{7}$', l)), "-")
                     
-                    # 3개 다 찾으면 조기 종료
-                    if u_date != "-" and u_build != "-" and u_kb != "-": break
-                
-                # 만약 위 루프에서 못찾을 경우 대비 (순서가 꼬여있을 때를 위한 fallback)
-                if u_date == "-": u_date = next((l for l in lines[target_idx+1:target_idx+6] if re.match(r'\d{4}-\d{2}-\d{2}', l)), "-")
-                if u_build == "-": u_build = next((l for l in lines[target_idx+1:target_idx+6] if "26100" in l), "-")
-                if u_kb == "-": u_kb = next((l for l in lines[target_idx+1:target_idx+6] if "KB" in l), "-")
-
-                versions['windows_11_24h2'] = {
-                    'version': f"Build {u_build} ({u_kb})" if u_kb != "-" else f"Build {u_build}",
-                    'date': u_date.replace('-', '/')
-                }
-            else:
-                versions['windows_11_24h2'] = {'version': 'B타입 찾지 못함', 'date': '-'}
-    except Exception as e:
+                    # 26100 빌드를 찾았다면 이것이 우리가 찾는 LTSC/최신 보안 패치임
+                    if temp_build != "-" and "26100" in temp_build:
+                        u_date, u_build, u_kb = temp_date, temp_build, temp_kb
+                        break
+            
+            versions['windows_11_24h2'] = {
+                'version': f"Build {u_build} ({u_kb})" if u_kb != "-" else f"Build {u_build}",
+                'date': u_date.replace('-', '/') if u_date != "-" else "-"
+            }
+    except:
         versions['windows_11_24h2'] = {'version': '오류', 'date': '-'}
-
     return versions
 
 def main():
