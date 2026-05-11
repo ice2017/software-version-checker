@@ -27,7 +27,7 @@ def send_telegram_msg(message):
 
 def send_email_msg(subject, body):
     if not all([EMAIL_ADDR, EMAIL_PASS, RECEIVER_ADDR]):
-        print("⚠️ 이메일 환경변수 미설정으로 발송을 건너뜁니다.")
+        print("이메일 환경변수 미설정으로 발송을 건너뜁니다.")
         return
     
     msg = MIMEText(body, 'plain', 'utf-8')
@@ -40,9 +40,9 @@ def send_email_msg(subject, body):
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(EMAIL_ADDR, EMAIL_PASS)
             server.sendmail(EMAIL_ADDR, [RECEIVER_ADDR], msg.as_string())
-            print("✉️ 이메일 리포트 발송 완료")
+            print("이메일 리포트 발송 완료")
     except Exception as e:
-        print(f"❌ 이메일 발송 실패: {e}")
+        print(f"이메일 발송 실패: {e}")
 
 def get_latest_versions():
     versions = {}
@@ -170,10 +170,10 @@ def main():
 
     # 알림 발송 조건: 변동이 있거나, 9시 정기 보고 모드인 경우
     if changed_keys or force_report:
-        title = "📢 [S/W 업데이트 모니터링 정기보고]" if force_report else "🔔 [S/W 업데이트 감지]"
+        title = "[S/W 업데이트 모니터링 정기보고]" if force_report else "[S/W 업데이트 감지]"
         report = f"{title}\n\n"
         if changed_keys:
-            report += f"🚀 업데이트 감지: {', '.join(changed_keys)}\n\n"
+            report += f"업데이트 감지: {', '.join(changed_keys)}\n\n"
         
         report += "━━━━━ 현재 전체 현황 ━━━━━\n"
         for key, display_name in display_order:
