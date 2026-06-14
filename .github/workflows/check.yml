@@ -1,31 +1,24 @@
 name: Software Version Monitor
-
 on:
   schedule:
-    - cron: '0 * * * *'  # 매 시간 정각 실행
-  workflow_dispatch:      # 수동 실행 버튼
-
+    - cron: '0 0 * * 1-5'  # 평일 오전 9시 KST (UTC 0시 = KST 9시)
+  workflow_dispatch:         # 수동 실행 버튼
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Install dependencies
-        run: pip install requests beautifulsoup4
-
+        run: pip install requests
       - name: Run monitor script
         env:
-          # [중요] Secrets의 값을 파이썬 환경변수로 매핑
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           EMAIL_ADDR: ${{ secrets.EMAIL_ADDR }}
@@ -40,7 +33,6 @@ jobs:
             echo "🔍 업데이트 변동 사항을 체크합니다."
             python monitor.py
           fi
-
       - name: Commit and push if versions.json changed
         run: |
           git config --global user.name 'github-actions[bot]'
