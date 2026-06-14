@@ -22,10 +22,16 @@ def send_telegram_msg(message):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    try:
-        requests.post(url, json={'chat_id': TELEGRAM_CHAT_ID, 'text': message}, timeout=10)
-    except Exception as e:
-        print(f"텔레그램 전송 실패: {e}")
+    # 텔레그램 메시지 4096자 제한 -> 분할 발송
+    max_len = 4000
+    chunks = [message[i:i+max_len] for i in range(0, len(message), max_len)]
+    for i, chunk in enumerate(chunks):
+        try:
+            res = requests.post(url, json={'chat_id': TELEGRAM_CHAT_ID, 'text': chunk}, timeout=10)
+            if res.status_code != 200:
+                print(f"텔레그램 전송 실패 ({i+1}/{len(chunks)}): {res.text}")
+        except Exception as e:
+            print(f"텔레그램 전송 실패 ({i+1}/{len(chunks)}): {e}")
 
 def send_email_msg(subject, body):
     if not all([EMAIL_ADDR, EMAIL_PASS, RECEIVER_ADDR]):
