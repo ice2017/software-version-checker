@@ -231,18 +231,13 @@ def build_report(sw_data, sw_changed, rocky_errata, cisa_kev, force_report):
             items = [a for a in rocky_errata if a['severity'] == sev]
             if items:
                 report += f"\n[{sev}] {len(items)}건\n"
-                for a in items[:10]:
+                for a in items:
                     score_str = f" (CVSS {a['score']})" if a['score'] > 0 else ""
                     report += f"{mark} [{a['product']}] {a['name']} | {a['date']}{score_str}\n"
                     report += f"   {a['synopsis']}\n"
                     if a['cves']:
-                        cve_str = ', '.join(a['cves'][:5])
-                        if len(a['cves']) > 5:
-                            cve_str += f" 외 {len(a['cves'])-5}건"
-                        report += f"   CVE: {cve_str}\n"
+                        report += f"   CVE: {', '.join(a['cves'])}\n"
                     report += "\n"
-                if len(items) > 10:
-                    report += f"   ... 외 {len(items)-10}건\n\n"
     else:
         report += "   해당 기간 내 에라타 없음\n\n"
 
@@ -251,17 +246,15 @@ def build_report(sw_data, sw_changed, rocky_errata, cisa_kev, force_report):
     report += "─" * 40 + "\n"
     if cisa_kev:
         report += f"총 {len(cisa_kev)}건\n\n"
-        for v in cisa_kev[:20]:
+        for v in cisa_kev:
             report += f"⚠️  {v.get('cveID')} | {v.get('dateAdded')} | {v.get('vendorProject')} - {v.get('product')}\n"
             desc = v.get('shortDescription', '')
             if desc:
-                report += f"   {desc[:100]}\n"
+                report += f"   {desc}\n"
             due = v.get('dueDate', '')
             if due:
                 report += f"   조치 기한: {due}\n"
             report += "\n"
-        if len(cisa_kev) > 20:
-            report += f"   ... 외 {len(cisa_kev)-20}건\n\n"
     else:
         report += "   해당 기간 내 신규 등록 없음\n\n"
 
