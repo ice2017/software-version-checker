@@ -25,9 +25,9 @@ jobs:
           EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
           RECEIVER_ADDR: ${{ secrets.RECEIVER_ADDR }}
         run: |
-          # UTC 00:00은 한국 시간(KST)으로 오전 09:00입니다.
-          if [ "$(date +%H)" = "00" ]; then
-            echo "📢 오전 9시 정기 리포트 모드로 실행합니다."
+          # 수동 실행이거나 UTC 00:00(KST 09:00)이면 정기 리포트 모드
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$(date +%H)" = "00" ]; then
+            echo "📢 정기 리포트 모드로 실행합니다."
             python monitor.py --report
           else
             echo "🔍 업데이트 변동 사항을 체크합니다."
